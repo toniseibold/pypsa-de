@@ -1065,7 +1065,7 @@ rule plot_report:
         report=directory(RESULTS + "report"),
         import_vol=RESULTS + "report/import_volumes.png",
         cons_cost=RESULTS + "report/consumer_costs.png",
-        # map=RESULTS + "report/h2_co2_map.png",
+        map=RESULTS + "report/h2_co2_map.png",
         revenue=RESULTS + "report/revenue.csv",
         hydrogen=RESULTS + "report/h2.csv",
         carbon=RESULTS + "report/co2.csv",

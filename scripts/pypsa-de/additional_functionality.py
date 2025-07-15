@@ -275,7 +275,7 @@ def electricity_import_limits(n, investment_year, limits_volume_max):
         )
 
 
-def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year):
+def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year, transport_fuels_only):
     """
     Add a set of emissions limit constraints for specified countries.
 
@@ -409,6 +409,19 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
                     * n.snapshot_weightings.generators
                 ).sum()
             )
+        else:
+            incoming_methanol = n.links.index[
+                n.links.index == f"EU shipping meoh -> DE shipping meoh"
+            ]
+
+            lhs.append(
+                (
+                    -1
+                    * n.model["Link-p"].loc[:, incoming_methanol]
+                    / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
+                    * n.snapshot_weightings.generators
+                ).sum()
+            )
 
         # Methane
         incoming_CH4 = n.links.index[n.links.index == f"EU renewable gas -> {ct} gas"]
@@ -436,20 +449,6 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
             (n.links.carrier == "import shipping-ftfuel") &
             (n.links.bus1.str[:2] == ct)
         ]
-        incoming_shipping_meoh = n.links.index[
-            (n.links.carrier == "import shipping-meoh") &
-            (n.links.bus1.str[:2] == ct)
-        ]
-
-        lhs.append(
-                (
-                    -1
-                    * n.model["Link-p"].loc[:, incoming_shipping_meoh]
-                    / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
-                    * n.snapshot_weightings.generators
-                ).sum()
-            )
-
         lhs.append(
                 (
                     -1
@@ -458,6 +457,20 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
                     * n.snapshot_weightings.generators
                 ).sum()
             )
+
+        if not transport_fuels_only:
+            incoming_shipping_meoh = n.links.index[
+                (n.links.carrier == "import shipping-meoh") &
+                (n.links.bus1.str[:2] == ct)
+            ]
+            lhs.append(
+                    (
+                        -1
+                        * n.model["Link-p"].loc[:, incoming_shipping_meoh]
+                        / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
+                        * n.snapshot_weightings.generators
+                    ).sum()
+                )
 
         lhs = sum(lhs)
 
@@ -561,6 +574,7 @@ def additional_functionality(n, snapshots, snakemake):
             snakemake,
             constraints["co2_budget_national"],
             investment_year,
+            constraints["transport_fuels_only"],
         )
     else:
         logger.warning("No national CO2 budget specified!")
