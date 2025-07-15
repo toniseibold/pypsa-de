@@ -516,7 +516,7 @@ plotting:
     Fischer-Tropsch: '#25c49a'
     liquid: '#25c49a'
     kerosene for aviation: '#a1ffe6'
-    naphtha for industry: '#57ebc4'
+    ethylene for industry: '#57ebc4'
     methanol-to-kerosene: '#C98468'
     methanol-to-olefins/aromatics: '#FFA07A'
     Methanol steam reforming: '#FFBF00'

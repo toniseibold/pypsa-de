@@ -6,9 +6,16 @@ import pandas as pd
 import pypsa
 from shapely.geometry import Point
 
-from scripts._helpers import configure_logging, mock_snakemake, sanitize_custom_columns
 from scripts.add_electricity import load_costs
 from scripts.prepare_sector_network import lossy_bidirectional_links
+
+from scripts._helpers import (
+    configure_logging,
+    sanitize_custom_columns,
+    set_scenario_config,
+    update_config_from_wildcards,
+    mock_snakemake,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -304,10 +311,10 @@ def add_wasserstoff_kernnetz(n, wkn, costs):
     # from 2030 onwards all pipes are extendable (except from the ones the model build up before and the kernnetz lines)
 
 
-def unravel_carbonaceous_fuels(n):
+def unravel_oil(n):
     """
-    Unravel European carbonaceous buses and if necessary their loads to enable
-    energy balances for import and export of carbonaceous fuels.
+    Unravel European oil buses and if necessary their loads to enable
+    energy balances for import and export of oil.
     """
     ### oil bus
     logger.info("Unraveling oil bus")
@@ -397,7 +404,7 @@ def unravel_carbonaceous_fuels(n):
         carrier="renewable oil",
         p_nom=1e6,
         p_min_pu=0,
-        marginal_cost=0.01,
+        marginal_cost=0.5,
     )
 
     if snakemake.params.efuel_export_ban:
@@ -449,8 +456,7 @@ def unravel_carbonaceous_fuels(n):
             "There are loads at the EU oil bus. Please set config[sector][regional_oil_demand] to True to enable energy balances for oil."
         )
 
-    ##########################################
-    ### meoh bus
+def unravel_meoh(n, costs):
     logger.info("Unraveling methanol bus")
     # add bus
     n.add(
@@ -926,6 +932,8 @@ def add_hydrogen_turbines(n):
         ].index
         if gas_plants.empty:
             continue
+        if "H2" + carrier not in n.carriers.index:
+            n.add("Carrier", "H2 " + carrier)
         h2_plants = n.links.loc[gas_plants].copy()
         h2_plants.carrier = h2_plants.carrier.str.replace(carrier, "H2 " + carrier)
         h2_plants.index = h2_plants.index.str.replace(carrier, "H2 " + carrier)
@@ -941,6 +949,8 @@ def add_hydrogen_turbines(n):
         & (n.links.index.str[:2] == "DE")
         & (n.links.p_nom_extendable)
     ].index
+    if "urban central H2 CHP" not in n.carriers.index:
+        n.add("Carrier", "urban central H2 CHP")
     h2_plants = n.links.loc[gas_plants].copy()
     h2_plants.carrier = h2_plants.carrier.str.replace("gas", "H2")
     h2_plants.index = h2_plants.index.str.replace("gas", "H2")
@@ -1279,6 +1289,8 @@ if __name__ == "__main__":
         )
 
     configure_logging(snakemake)
+    set_scenario_config(snakemake)
+    update_config_from_wildcards(snakemake.config, snakemake.wildcards)
     logger.info("Adding Ariadne-specific functionality")
 
     n = pypsa.Network(snakemake.input.network)
@@ -1306,7 +1318,10 @@ if __name__ == "__main__":
 
     first_technology_occurrence(n)
 
-    unravel_carbonaceous_fuels(n)
+    unravel_oil(n)
+
+    if "methanol" in snakemake.params.relocation:
+        unravel_meoh(n, costs)
 
     unravel_gasbus(n, costs)
 

@@ -2,8 +2,12 @@ import logging
 
 import pandas as pd
 
-from scripts._helpers import configure_logging, mock_snakemake
-
+from scripts._helpers import (
+    configure_logging,
+    set_scenario_config,
+    update_config_from_wildcards,
+    mock_snakemake,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -15,6 +19,8 @@ if __name__ == "__main__":
         )
 
     configure_logging(snakemake)
+    set_scenario_config(snakemake)
+    update_config_from_wildcards(snakemake.config, snakemake.wildcards)
 
     existing_heating = pd.read_csv(snakemake.input.existing_heating, index_col=0)
 

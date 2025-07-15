@@ -157,9 +157,12 @@ def define_spatial(nodes, options):
 
     if options["ammonia"]:
         spatial.ammonia = SimpleNamespace()
-        if options["ammonia"] == "regional":
+        if options["ammonia"] == "regional" and "ammonia" not in options["relocation"]:
             spatial.ammonia.nodes = nodes + " NH3"
             spatial.ammonia.locations = nodes
+        elif options["relocation"] and "ammonia" in options["relocation"]:
+            spatial.ammonia.nodes = ["EU NH3"]
+            spatial.ammonia.locations = ["EU"]
         else:
             spatial.ammonia.nodes = ["EU NH3"]
             spatial.ammonia.locations = ["EU"]
@@ -178,8 +181,12 @@ def define_spatial(nodes, options):
 
     spatial.methanol = SimpleNamespace()
 
-    spatial.methanol.nodes = ["EU methanol"]
-    spatial.methanol.locations = ["EU"]
+    if "methanol" in options.get("relocation"):
+        spatial.methanol.nodes = ["EU methanol"]
+        spatial.methanol.locations = ["EU"]
+    else:
+        spatial.methanol.nodes = nodes + " methanol"
+        spatial.methanol.locations = nodes
 
     if options["methanol"]["regional_methanol_demand"]:
         spatial.methanol.demand_locations = nodes
@@ -198,7 +205,7 @@ def define_spatial(nodes, options):
 
     if options["regional_oil_demand"]:
         spatial.oil.demand_locations = nodes
-        spatial.oil.naphtha = nodes + " naphtha for industry"
+        spatial.oil.ethylene = nodes + " ethylene for industry"
         spatial.oil.non_sequestered_hvc = nodes + " non-sequestered HVC"
         spatial.oil.kerosene = nodes + " kerosene for aviation"
         spatial.oil.shipping = nodes + " shipping oil"
@@ -206,7 +213,7 @@ def define_spatial(nodes, options):
         spatial.oil.land_transport = nodes + " land transport oil"
     else:
         spatial.oil.demand_locations = ["EU"]
-        spatial.oil.naphtha = ["EU naphtha for industry"]
+        spatial.oil.ethylene = ["EU ethylene for industry"]
         spatial.oil.non_sequestered_hvc = ["EU non-sequestered HVC"]
         spatial.oil.kerosene = ["EU kerosene for aviation"]
         spatial.oil.shipping = ["EU shipping oil"]
@@ -649,16 +656,19 @@ def add_carrier_buses(
 
     n.add("Bus", nodes, location=location, carrier=carrier, unit=unit)
 
-    n.add(
-        "Store",
-        nodes + " Store",
-        bus=nodes,
-        e_nom_extendable=True,
-        e_cyclic=True,
-        carrier=carrier,
-        capital_cost=capital_cost,
-        overnight_cost=overnight_cost,
-    )
+    if carrier != "methanol" or "methanol" in options["flexibility"]:
+        if carrier == "methanol":
+            logger.info("Methanol flexibility activated.")
+        n.add(
+            "Store",
+            nodes + " Store",
+            bus=nodes,
+            e_nom_extendable=True,
+            e_cyclic=True,
+            carrier=carrier,
+            capital_cost=capital_cost,
+            overnight_cost=overnight_cost,
+        )
 
     fossils = ["coal", "gas", "oil", "lignite", "uranium"]
     if options["fossil_fuels"] and carrier in fossils:
@@ -1565,6 +1575,7 @@ def add_ammonia(
         bus1=spatial.ammonia.nodes,
         bus2=nodes + " H2",
         p_nom_extendable=True,
+        p_min_pu=options["min_part_load_methanolisation"],
         carrier="Haber-Bosch",
         efficiency=1 / costs.at["Haber-Bosch", "electricity-input"],
         efficiency2=-costs.at["Haber-Bosch", "hydrogen-input"]
@@ -1595,22 +1606,26 @@ def add_ammonia(
     )
 
     # Ammonia Storage
-    n.add(
-        "Store",
-        spatial.ammonia.nodes,
-        suffix=" ammonia store",
-        bus=spatial.ammonia.nodes,
-        e_nom_extendable=True,
-        e_cyclic=True,
-        carrier="ammonia store",
-        capital_cost=costs.at[
-            "NH3 (l) storage tank incl. liquefaction", "capital_cost"
-        ],
-        overnight_cost=costs.at[
-            "NH3 (l) storage tank incl. liquefaction", "investment"
-        ],
-        lifetime=costs.at["NH3 (l) storage tank incl. liquefaction", "lifetime"],
-    )
+    if "ammonia" in options["flexibility"]:
+        logger.info(f"Ammonia flexibility activated.")
+        n.add(
+            "Store",
+            spatial.ammonia.nodes,
+            suffix=" ammonia store",
+            bus=spatial.ammonia.nodes,
+            e_nom_extendable=True,
+            e_cyclic=True,
+            carrier="ammonia",
+            capital_cost=costs.at[
+                "NH3 (l) storage tank incl. liquefaction", "capital_cost"
+            ],
+            overnight_cost=costs.at[
+                "NH3 (l) storage tank incl. liquefaction", "investment"
+            ],
+            lifetime=costs.at["NH3 (l) storage tank incl. liquefaction", "lifetime"],
+        )
+    else:
+        logger.info(f"Ammonia flexibility not activated.")
 
 
 def insert_electricity_distribution_grid(
@@ -4612,7 +4627,7 @@ def add_biomass(
         n.add(
             "Link",
             spatial.biomass.nodes,
-            suffix=" biomass to liquid",
+            suffix=" to liquid",
             bus0=spatial.biomass.nodes,
             bus1=spatial.oil.nodes,
             bus2="co2 atmosphere",
@@ -5112,36 +5127,36 @@ def add_industry(
         lifetime=costs.at["Fischer-Tropsch", "lifetime"],
     )
 
-    # naphtha
+    # HVC
     demand_factor = options["HVC_demand_factor"]
     if demand_factor != 1:
         logger.warning(f"Changing HVC demand by {demand_factor * 100 - 100:+.2f}%.")
 
-    p_set_naphtha = (
+    p_set_ethylene = (
         demand_factor
         * industrial_demand.loc[nodes, "naphtha"].rename(
-            lambda x: x + " naphtha for industry"
+            lambda x: x + " ethylene for industry"
         )
         / nhours
     )
 
     if not options["regional_oil_demand"]:
-        p_set_naphtha = p_set_naphtha.sum()
+        p_set_ethylene = p_set_ethylene.sum()
 
     n.add(
         "Bus",
-        spatial.oil.naphtha,
+        spatial.oil.ethylene,
         location=spatial.oil.demand_locations,
-        carrier="naphtha for industry",
+        carrier="ethylene for industry",
         unit="MWh_LHV",
     )
 
     n.add(
         "Load",
-        spatial.oil.naphtha,
-        bus=spatial.oil.naphtha,
-        carrier="naphtha for industry",
-        p_set=p_set_naphtha,
+        spatial.oil.ethylene,
+        bus=spatial.oil.ethylene,
+        carrier="ethylene for industry",
+        p_set=p_set_ethylene,
     )
     # some CO2 from naphtha are process emissions from steam cracker
     # rest of CO2 released to atmosphere either in waste-to-energy or decay
@@ -5149,16 +5164,32 @@ def add_industry(
         industrial_demand.loc[nodes, "process emission from feedstock"].sum()
         / industrial_demand.loc[nodes, "naphtha"].sum()
     )
+
+    tech = "methanol-to-olefins/aromatics"
+
+    naphtha_per_t_hvc = 12.622  # MWh per tonne of HVC (taken from sector ratios)
+
+    process_emissions = (
+        costs.at[tech, "carbondioxide-output"] / costs.at[tech, "methanol-input"]
+    )
+
     # link to supply the naphtha for industry load
     n.add(
         "Link",
-        spatial.oil.naphtha,
-        bus0=spatial.oil.nodes,
-        bus1=spatial.oil.naphtha,
-        bus2=spatial.co2.process_emissions,
-        carrier="naphtha for industry",
+        nodes,
+        suffix=f" {tech}",
+        bus0=spatial.methanol.nodes,
+        bus1=spatial.oil.ethylene,
+        bus2=nodes,
+        bus3=spatial.co2.process_emissions,
+        efficiency=1
+            / costs.at[tech, "methanol-input"]
+            * naphtha_per_t_hvc,  # because MtO produces t HVC not MWh no MWh HVC
+        efficiency2=-costs.at[tech, "electricity-input"]
+            / costs.at[tech, "methanol-input"],
+        efficiency3=process_emissions,
+        carrier=tech,
         p_nom_extendable=True,
-        efficiency2=process_co2_per_naphtha,
     )
 
     non_sequestered = 1 - get(
@@ -5172,10 +5203,10 @@ def add_industry(
 
     # distribute HVC waste across population
     if len(spatial.oil.non_sequestered_hvc) == 1:
-        HVC_potential = p_set_naphtha.sum() * nhours * non_sequestered * HVC_per_naphtha
+        HVC_potential = p_set_ethylene.sum() * nhours * non_sequestered * HVC_per_naphtha
     else:
         HVC_potential_sum = (
-            p_set_naphtha.sum() * nhours * non_sequestered * HVC_per_naphtha
+            p_set_ethylene.sum() * nhours * non_sequestered * HVC_per_naphtha
         )
         shares = pop_layout.total / pop_layout.total.sum()
         HVC_potential = shares.mul(HVC_potential_sum)
@@ -5386,7 +5417,7 @@ def add_industry(
     )
 
     if options["ammonia"]:
-        if options["ammonia"] == "regional":
+        if options["ammonia"] == "regional" and "ammonia" not in options["relocation"]:
             p_set = (
                 industrial_demand.loc[spatial.ammonia.locations, "ammonia"].rename(
                     index=lambda x: x + " NH3"
@@ -6459,112 +6490,319 @@ def add_enhanced_geothermal(
             )
 
 
-def add_import_options(
-    n: pypsa.Network,
-    costs: pd.DataFrame,
-    options: dict,
-    gas_input_nodes: pd.DataFrame,
-):
-    """
-    Add green energy import options.
+def get_industrial_demand():
+    # import ratios [MWh/t_Material]
+    fn = snakemake.input.industry_sector_ratios
+    sector_ratios = pd.read_csv(fn, header=[0, 1], index_col=0)
 
-    Parameters
-    ----------
-    n : pypsa.Network
-    costs : pd.DataFrame
-    options : dict
-        Options from snakemake.params["sector"].
-    gas_input_nodes : pd.DataFrame
-        Locations of gas input nodes split by LNG and pipeline.
-    """
+    # material demand per node and industry [kt/a]
+    fn = snakemake.input.industrial_production
+    nodal_production = pd.read_csv(fn, index_col=0) / 1e3  # kt/a -> Mt/a
 
-    import_config = options["imports"]
-    import_options = import_config["price"]
-    logger.info(f"Adding import options:\n{pd.Series(import_options)}")
+    nodal_sector_ratios = pd.concat(
+        {node: sector_ratios[node[:2]] for node in nodal_production.index}, axis=1
+    )
 
-    if "methanol" in import_options:
-        co2_intensity = costs.at["methanolisation", "carbondioxide-input"]
+    nodal_production_stacked = nodal_production.stack()
+    nodal_production_stacked.index.names = [None, None]
 
+    # final energy consumption per node and industry (TWh/a)
+    nodal_df = (nodal_sector_ratios.multiply(nodal_production_stacked)).T
+
+    return nodal_df
+
+
+def endogenise_steel(n, costs, sector_options, relocation_option):
+
+    # industrial demand [TWh/a]
+    industrial_demand = get_industrial_demand() * 1e6  # TWh/a -> MWh/a
+    # industrial production in [kt/a]
+    industrial_production = (
+        pd.read_csv(snakemake.input.industrial_production, index_col=0) * 1e3
+    )  # kt/a -> t/a
+
+    pop_layout = pd.read_csv(snakemake.input.clustered_pop_layout, index_col=0)
+    DE_nodes = pop_layout[pop_layout.index.str[:2] == "DE"].index
+    EU_nodes = pop_layout[pop_layout.index.str[:2] != "DE"].index
+    nodes = pop_layout.index
+
+    endogenous_sectors = []
+    logger.info("Adding endogenous primary steel demand in tonnes.")
+    sector = "DRI + Electric arc"
+    endogenous_sectors += [sector]
+
+    if relocation_option and "hbi" in relocation_option:
+        logger.info("Relocation of DRI process activated.")
+        DE_hbi_nodes = "DE"
+        EU_hbi_nodes = "EU"
+        german_steel_load = industrial_production.loc[DE_nodes][sector].sum() / nhours
+        EU_steel_load = industrial_production.loc[EU_nodes][sector].sum() / nhours
+
+    else:
+        logger.info("Relocation of DRI process not activated.")
+        DE_hbi_nodes = DE_nodes
+        EU_hbi_nodes = EU_nodes
+
+    # EAF process and regional steel load stays
+    DE_steel_nodes = DE_nodes
+    EU_steel_nodes = EU_nodes
+    german_steel_load = industrial_production.loc[DE_nodes][sector] / nhours
+    EU_steel_load = industrial_production.loc[EU_nodes][sector] / nhours
+
+    s = " " if "steel" in sector_options["flexibility"] else " not "
+    logger.info(f"Steel industry flexibility{s}activated.")
+
+    n.add("Carrier", "steel")
+    n.add("Carrier", "hbi")
+    n.add("Carrier", "DRI")
+    n.add("Carrier", "EAF")
+    # add steel bus for German bus regions and EU
+    n.add(
+        "Bus",
+        EU_steel_nodes,
+        suffix=" steel",
+        carrier="steel",
+        unit="t",
+    )
+
+    n.add(
+        "Bus",
+        DE_steel_nodes, 
+        suffix=" steel",
+        carrier="steel",
+        unit="t",
+    )
+
+    n.add(
+        "Bus",
+        EU_hbi_nodes,
+        suffix=" hbi",
+        carrier="hbi",
+        unit="t",
+    )
+    n.add(
+        "Bus",
+        DE_hbi_nodes,
+        suffix=" hbi",
+        carrier="hbi",
+        unit="t",
+    )
+    # load EU and DE steel
+    n.add(
+        "Load",
+        EU_steel_nodes,
+        suffix = " steel",
+        bus=EU_steel_nodes + " steel",
+        carrier="steel",
+        p_set=EU_steel_load,
+    )
+
+    n.add(
+        "Load",
+        DE_steel_nodes,
+        suffix=" steel",
+        bus=DE_steel_nodes + " steel",
+        carrier="steel",
+        p_set=german_steel_load,
+    )
+
+    if "steel" in sector_options["flexibility"]:
+        n.add(
+            "Store",
+            EU_steel_nodes + " steel Store",
+            bus=EU_steel_nodes + " steel",
+            e_nom_extendable=True,
+            e_cyclic=True,
+            carrier="steel",
+        )
+        n.add(
+            "Store",
+            DE_steel_nodes + " steel Store",
+            bus=DE_steel_nodes + " steel",
+            e_nom_extendable=True,
+            e_cyclic=True,
+            carrier="steel",
+        )
+        n.add(
+            "Store",
+            EU_hbi_nodes + " hbi Store",
+            bus=EU_hbi_nodes + " hbi",
+            e_nom_extendable=True,
+            e_cyclic=True,
+            carrier="hbi",
+        )
+        n.add(
+            "Store",
+            DE_hbi_nodes + " hbi Store",
+            bus=DE_hbi_nodes + " hbi",
+            e_nom_extendable=True,
+            e_cyclic=True,
+            carrier="hbi",
+        )
+
+    #  Iron ore to hbi
+    electricity_input = costs.at["direct iron reduction furnace", "electricity-input"]
+    hydrogen_input = costs.at["direct iron reduction furnace", "hydrogen-input"]
+
+    marginal_cost = (
+        costs.at["iron ore DRI-ready", "commodity"]
+        * costs.at["direct iron reduction furnace", "ore-input"]
+        / electricity_input
+    )
+
+    n.add(
+        "Link",
+        EU_nodes,
+        suffix=" DRI",
+        carrier="DRI",
+        capital_cost=costs.at["direct iron reduction furnace", "capital_cost"]
+        / electricity_input,
+        marginal_cost=marginal_cost,
+        p_nom=0,
+        p_nom_extendable=True,
+        p_min_pu=0.9,
+        bus0=EU_nodes,
+        bus1=EU_hbi_nodes + " hbi",
+        bus2=EU_nodes + " H2",
+        efficiency=1 / electricity_input,
+        efficiency2=-hydrogen_input / electricity_input,
+        lifetime=costs.at["direct iron reduction furnace", "lifetime"],
+    )
+    n.add(
+        "Link",
+        DE_nodes,
+        suffix=" DRI",
+        carrier="DRI",
+        capital_cost=costs.at["direct iron reduction furnace", "capital_cost"]
+        / electricity_input,
+        marginal_cost=marginal_cost,
+        p_nom=0,
+        p_nom_extendable=True,
+        p_min_pu=0.9,
+        bus0=DE_nodes,
+        bus1=DE_hbi_nodes + " hbi",
+        bus2=DE_nodes + " H2",
+        efficiency=1 / electricity_input,
+        efficiency2=-hydrogen_input / electricity_input,
+        lifetime=costs.at["direct iron reduction furnace", "lifetime"],
+    )
+
+    # HBI to steel via electric arc furnace
+    electricity_input = costs.at["electric arc furnace", "electricity-input"]
+
+    n.add(
+        "Link",
+        EU_nodes,
+        suffix=" EAF",
+        carrier="EAF",
+        capital_cost=costs.at["electric arc furnace", "capital_cost"] / electricity_input,
+        p_nom=0,
+        p_nom_extendable=True,
+        p_min_pu=0.8,
+        bus0=EU_nodes,
+        bus1=EU_steel_nodes + " steel",
+        bus2=EU_hbi_nodes + " hbi",
+        efficiency=1 / electricity_input,
+        efficiency2=-costs.at["electric arc furnace", "hbi-input"] / electricity_input,
+        lifetime=costs.at["electric arc furnace", "lifetime"]
+    )
+    n.add(
+        "Link",
+        DE_nodes,
+        suffix=" EAF",
+        carrier="EAF",
+        capital_cost=costs.at["electric arc furnace", "capital_cost"] / electricity_input,
+        p_nom=0,
+        p_nom_extendable=True,
+        p_min_pu=0.8,
+        bus0=DE_nodes,
+        bus1=DE_steel_nodes + " steel",
+        bus2=DE_hbi_nodes + " hbi",
+        efficiency=1 / electricity_input,
+        efficiency2=-costs.at["electric arc furnace", "hbi-input"] / electricity_input,
+    )
+
+    # allow transport of steel between EU and DE
+    if relocation_option and "hbi" in relocation_option:
         n.add(
             "Link",
-            spatial.methanol.nodes,
-            suffix=" import",
-            carrier="import methanol",
-            bus0="co2 atmosphere",
-            bus1=spatial.methanol.nodes,
-            efficiency=1 / co2_intensity,
-            marginal_cost=import_options["methanol"] / co2_intensity,
-            p_nom=1e7,
+            [
+                "EU hbi -> DE hbi",
+                "DE hbi -> EU hbi",
+            ],
+            bus0=["EU hbi", "DE hbi"],
+            bus1=["DE hbi", "EU hbi"],
+            carrier=["hbi", "hbi"],
+            p_nom=1e4,
+            marginal_cost=5.5,
         )
 
-    if "oil" in import_options:
-        co2_intensity = costs.at["oil", "CO2 intensity"]
+    adjust_industry_loads(n, nodes, industrial_demand, endogenous_sectors)
 
-        n.add(
-            "Link",
-            spatial.oil.nodes,
-            suffix=" import",
-            carrier="import oil",
-            bus0="co2 atmosphere",
-            bus1=spatial.oil.nodes,
-            efficiency=1 / co2_intensity,
-            marginal_cost=import_options["oil"] / co2_intensity,
-            p_nom=1e7,
-        )
 
-    if "gas" in import_options:
-        co2_intensity = costs.at["gas", "CO2 intensity"]
+def adjust_industry_loads(n, nodes, industrial_demand, endogenous_sectors):
 
-        p_nom = gas_input_nodes["lng"].dropna()
-        p_nom.rename(lambda x: x + " gas", inplace=True)  #
-        if len(spatial.gas.nodes) == 1:
-            p_nom = p_nom.sum()
-            nodes = spatial.gas.nodes
-        else:
-            nodes = p_nom.index
+    remaining_sectors = ~industrial_demand.index.get_level_values(1).isin(
+        endogenous_sectors
+    )
 
-        n.add(
-            "Link",
-            nodes,
-            suffix=" import",
-            carrier="import gas",
-            bus0="co2 atmosphere",
-            bus1=nodes,
-            efficiency=1 / co2_intensity,
-            marginal_cost=import_options["gas"] / co2_intensity,
-            p_nom=p_nom / co2_intensity,
-        )
+    remaining_demand = (
+        industrial_demand.loc[(nodes, remaining_sectors), :].groupby(level=0).sum()
+    )
 
-    if "NH3" in import_options:
-        if options["ammonia"]:
-            n.add(
-                "Generator",
-                spatial.ammonia.nodes,
-                suffix=" import",
-                bus=spatial.ammonia.nodes,
-                carrier="import NH3",
-                p_nom=1e7,
-                marginal_cost=import_options["NH3"],
-            )
+    # methane
+    gas_demand = (
+        remaining_demand.loc[:, "methane"]
+        .groupby(level=0)
+        .sum()
+        .rename(index=lambda x: x + " gas for industry")
+        / nhours
+    )
 
-        else:
-            logger.warning(
-                "Skipping specified ammonia imports because ammonia carrier is not present."
-            )
+    n.loads.loc[gas_demand.index, "p_set"] = gas_demand.values
 
-    if "H2" in import_options:
-        p_nom = gas_input_nodes["pipeline"].dropna()
-        p_nom.rename(lambda x: x + " H2", inplace=True)
+    # hydrogen
+    h2_demand = (
+        remaining_demand.loc[:, "hydrogen"]
+        .groupby(level=0)
+        .sum()
+        .rename(index=lambda x: x + " H2 for industry")
+        / nhours
+    )
 
-        n.add(
-            "Generator",
-            p_nom.index,
-            suffix=" import",
-            bus=p_nom.index,
-            carrier="import H2",
-            p_nom=p_nom,
-            marginal_cost=import_options["H2"],
-        )
+    n.loads.loc[h2_demand.index, "p_set"] = h2_demand.values
+
+    # heat
+    heat_demand = (
+        remaining_demand.loc[:, "heat"]
+        .groupby(level=0)
+        .sum()
+        .rename(index=lambda x: x + " low-temperature heat for industry")
+        / nhours
+    )
+    n.loads.loc[heat_demand.index, "p_set"] = heat_demand.values
+
+    # elec
+    elec_demand = (
+        remaining_demand.loc[:, "elec"]
+        .groupby(level=0)
+        .sum()
+        .rename(index=lambda x: x + " industry electricity")
+        / nhours
+    )
+    n.loads.loc[elec_demand.index, "p_set"] = elec_demand.values
+
+    # process emission
+    process_emissions = (
+        -remaining_demand.loc[:, "process emission"]
+        .groupby(level=0)
+        .sum()
+        .rename(index=lambda x: x + " process emissions")
+        / nhours
+    )
+
+    n.loads.loc[process_emissions.index, "p_set"] = process_emissions.values
+
 
 
 if __name__ == "__main__":
@@ -6574,9 +6812,10 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "prepare_sector_network",
             opts="",
-            clusters="10",
-            sector_opts="",
+            clusters="68",
+            sector_opts="none",
             planning_horizons="2050",
+            run="Base",
         )
 
     configure_logging(snakemake)  # pylint: disable=E0606
@@ -6872,9 +7111,6 @@ if __name__ == "__main__":
             egs_capacity_factors="path/to/capacity_factors.csv",
         )
 
-    if options["imports"]["enable"]:
-        add_import_options(n, costs, options, gas_input_nodes)
-
     if options["gas_distribution_grid"]:
         insert_gas_distribution_costs(n, costs, options=options)
 
@@ -6905,6 +7141,9 @@ if __name__ == "__main__":
         maybe_adjust_costs_and_potentials(
             n, snakemake.params["adjustments"], investment_year
         )
+
+    relocation_option = options["relocation"]
+    endogenise_steel(n, costs, options, relocation_option)
 
     n.meta = dict(snakemake.config, **dict(wildcards=dict(snakemake.wildcards)))
 

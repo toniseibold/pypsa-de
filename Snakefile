@@ -553,10 +553,12 @@ rule modify_prenetwork:
         shipping_methanol_share=config_provider("sector", "shipping_methanol_share"),
         mwh_meoh_per_tco2=config_provider("sector", "MWh_MeOH_per_tCO2"),
         scale_capacity=config_provider("scale_capacity"),
+        relocation=config_provider("sector", "relocation"),
+        sector=config_provider("sector"),
     input:
         costs_modifications="ariadne-data/costs_{planning_horizons}-modifications.csv",
         network=resources(
-            "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_brownfield.nc"
+            "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.nc"
         ),
         wkn=lambda w: (
             resources("wasserstoff_kernnetz_base_s_{clusters}.csv")
@@ -958,3 +960,147 @@ rule ariadne_report_only:
             RESULTS + "ariadne/report/elec_price_duration_curve.pdf",
             run=config_provider("run", "name"),
         ),
+
+
+rule build_import_ports:
+    input:
+        gem="data/gem/Europe-Gas-Tracker-2024-05.xlsx",
+        entry="data/gas_network/scigrid-gas/data/IGGIELGN_BorderPoints.geojson",
+        storage="data/gas_network/scigrid-gas/data/IGGIELGN_Storages.geojson",
+        regions_onshore=resources("regions_onshore_base_s_{clusters}.geojson"),
+        regions_offshore=resources("regions_offshore_base_s_{clusters}.geojson"),
+        europe_shape=resources("europe_shape.geojson"),
+        reference_import_sites=("import-data/import-sites.csv"),
+    output:
+        ports=resources("ports_s_{clusters}.csv"),
+        gas_input_nodes_simplified=resources(
+            "gas_input_nodes_simplified_elec_s_{clusters}.csv"
+        ),
+    resources:
+        mem_mb=2000,
+    log:
+        logs("build_import_ports_{clusters}.log"),
+    script:
+        "scripts/pypsa-de/build_import_ports.py"
+
+
+rule modify_final_network:
+    params:
+        temporal_clustering=config_provider(
+            "clustering", "temporal", "resolution_sector"
+        ),
+        import_options=config_provider("import"),
+        sector_options=config_provider("sector"),
+        costs=config_provider("costs"),
+        trace_scenario=config_provider("import", "trace_scenario"),
+        transport_fuels_only=config_provider("solving", "constraints", "transport_fuels_only"),
+    input:
+        network=resources(
+            "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final.nc"
+        ),
+        gas_input_nodes_simplified=resources(
+            "gas_input_nodes_simplified_elec_s_{clusters}.csv"
+        ),
+        import_ports=resources("ports_s_{clusters}.csv"),
+        import_costs="import-data/imports/{planning_horizons}/results.csv",
+        hvdc_data="import-data/imports/combined_weighted_generator_timeseries.nc",
+        regions_onshore=resources("regions_onshore_base_s_{clusters}.geojson"),
+        country_centroids="import-data/countries_centroids.csv",
+        costs=resources("costs_{planning_horizons}.csv"),
+        clustered_pop_layout=resources("pop_layout_base_s_{clusters}.csv"),
+        industry_sector_ratios=resources(
+            "industry_sector_ratios_{planning_horizons}.csv"
+        ),
+        industrial_production=resources(
+            "industrial_production_base_s_{clusters}_{planning_horizons}.csv"
+        ),
+        industrial_demand=resources(
+            "industrial_energy_demand_base_s_{clusters}_{planning_horizons}.csv"
+        ),
+        country_shapes="data/naturalearth/ne_10m_admin_0_countries_deu.shp",
+    output:
+        network=resources(
+            "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final_import.nc"
+        ),
+    log: RESULTS
+        + "logs/modify_final_network_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.log",
+    script:
+        "scripts/pypsa-de/modify_final_network.py"
+
+rule plot_report:
+    params:
+        planning_horizons=config_provider("scenario", "planning_horizons"),
+        plotting=config_provider("plotting"),
+        run=config_provider("run", "name"),
+        hours=config_provider("clustering", "temporal", "resolution_sector"),
+        non_eu_import=config_provider("import"),
+        relocation=config_provider("sector", "relocation")
+    input:
+        networks=expand(
+            RESULTS
+            + "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.nc",
+            **config["scenario"],
+            allow_missing=True,
+        ),
+        industry_sector_ratios=expand(
+            resources(
+                "industry_sector_ratios_{planning_horizons}.csv"
+            ),
+            **config["scenario"],
+            allow_missing=True,
+        ),
+        industrial_production=expand(
+            resources(
+                "industrial_production_base_s_{clusters}_{planning_horizons}.csv"
+            ),
+            **config["scenario"],
+            allow_missing=True,
+        ),
+        regions_onshore_clustered=expand(
+            resources("regions_onshore_base_s_{clusters}.geojson"),
+            clusters=config["scenario"]["clusters"],
+            allow_missing=True,
+        ),
+    output:
+        report=directory(RESULTS + "report"),
+        import_vol=RESULTS + "report/import_volumes.png",
+        cons_cost=RESULTS + "report/consumer_costs.png",
+        # map=RESULTS + "report/h2_co2_map.png",
+        revenue=RESULTS + "report/revenue.csv",
+        hydrogen=RESULTS + "report/h2.csv",
+        carbon=RESULTS + "report/co2.csv",
+        import_vols=RESULTS + "report/import_volumes.csv",
+        prices=RESULTS + "report/prices.csv",
+    log:
+        RESULTS + "logs/plot_report.log",
+    resources:
+        mem_mb=30000,
+    script:
+        "scripts/pypsa-de/plot_report.py"
+
+rule import_all:
+    params:
+        plotting=config_provider("plotting"),
+    input:
+        revenues=expand(
+            RESULTS + "report/revenue.csv",
+            run=config_provider("run", "name"),
+        ),
+        prices=expand(
+            RESULTS + "report/prices.csv",
+            run=config_provider("run", "name"),
+        ),
+        co2=expand(
+            RESULTS + "report/co2.csv",
+            run=config_provider("run", "name"),
+        ),
+        h2=expand(
+            RESULTS + "report/h2.csv",
+            run=config_provider("run", "name"),
+        ),
+        import_vol=expand(
+            RESULTS + "report/import_volumes.csv",
+            run=config_provider("run", "name"),
+        ),
+    script:
+        "scripts/pypsa-de/plot_import_comparison.py"

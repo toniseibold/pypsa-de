@@ -207,85 +207,6 @@ def h2_import_limits(n, investment_year, limits_volume_max):
             carrier_attribute="",
         )
 
-        logger.info("Adding H2 export ban")
-
-        cname = f"H2_export_ban-{ct}"
-
-        n.model.add_constraints(lhs >= 0, name=f"GlobalConstraint-{cname}")
-
-        if cname in n.global_constraints.index:
-            logger.warning(
-                f"Global constraint {cname} already exists. Dropping and adding it again."
-            )
-            n.global_constraints.drop(cname, inplace=True)
-
-        n.add(
-            "GlobalConstraint",
-            cname,
-            constant=0,
-            sense=">=",
-            type="",
-            carrier_attribute="",
-        )
-
-
-def h2_production_limits(n, investment_year, limits_volume_min, limits_volume_max):
-    for ct in limits_volume_max["electrolysis"]:
-        if ct not in limits_volume_min["electrolysis"]:
-            logger.warning(
-                f"no lower limit for H2 electrolysis in {ct} assuming 0 TWh/a"
-            )
-            limit_lower = 0
-        else:
-            limit_lower = limits_volume_min["electrolysis"][ct][investment_year] * 1e6
-
-        limit_upper = limits_volume_max["electrolysis"][ct][investment_year] * 1e6
-
-        logger.info(
-            f"limiting H2 electrolysis in DE between {limit_lower / 1e6} and {limit_upper / 1e6} TWh/a"
-        )
-
-        production = n.links[
-            (n.links.carrier == "H2 Electrolysis") & (n.links.bus0.str.contains(ct))
-        ].index
-        efficiency = n.links.loc[production, "efficiency"]
-
-        lhs = (
-            n.model["Link-p"].loc[:, production]
-            * n.snapshot_weightings.generators
-            * efficiency
-        ).sum()
-
-        cname_upper = f"H2_production_limit_upper-{ct}"
-        cname_lower = f"H2_production_limit_lower-{ct}"
-
-        n.model.add_constraints(
-            lhs <= limit_upper, name=f"GlobalConstraint-{cname_upper}"
-        )
-
-        n.model.add_constraints(
-            lhs >= limit_lower, name=f"GlobalConstraint-{cname_lower}"
-        )
-
-        if cname_upper not in n.global_constraints.index:
-            n.add(
-                "GlobalConstraint",
-                cname_upper,
-                constant=limit_upper,
-                sense="<=",
-                type="",
-                carrier_attribute="",
-            )
-        if cname_lower not in n.global_constraints.index:
-            n.add(
-                "GlobalConstraint",
-                cname_lower,
-                constant=limit_lower,
-                sense=">=",
-                type="",
-                carrier_attribute="",
-            )
-
 
 def electricity_import_limits(n, investment_year, limits_volume_max):
     for ct in limits_volume_max["electricity_import"]:
@@ -464,30 +385,30 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
                 * n.snapshot_weightings.generators
             ).sum()
         )
+        if "EU methanol -> DE methanol" in n.links.index:
+            incoming_methanol = n.links.index[
+                n.links.index == f"EU methanol -> {ct} methanol"
+            ]
+            outgoing_methanol = n.links.index[
+                n.links.index == f"{ct} methanol -> EU methanol"
+            ]
 
-        incoming_methanol = n.links.index[
-            n.links.index == f"EU methanol -> {ct} methanol"
-        ]
-        outgoing_methanol = n.links.index[
-            n.links.index == f"{ct} methanol -> EU methanol"
-        ]
+            lhs.append(
+                (
+                    -1
+                    * n.model["Link-p"].loc[:, incoming_methanol]
+                    / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
+                    * n.snapshot_weightings.generators
+                ).sum()
+            )
 
-        lhs.append(
-            (
-                -1
-                * n.model["Link-p"].loc[:, incoming_methanol]
-                / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
-                * n.snapshot_weightings.generators
-            ).sum()
-        )
-
-        lhs.append(
-            (
-                n.model["Link-p"].loc[:, outgoing_methanol]
-                / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
-                * n.snapshot_weightings.generators
-            ).sum()
-        )
+            lhs.append(
+                (
+                    n.model["Link-p"].loc[:, outgoing_methanol]
+                    / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
+                    * n.snapshot_weightings.generators
+                ).sum()
+            )
 
         # Methane
         incoming_CH4 = n.links.index[n.links.index == f"EU renewable gas -> {ct} gas"]
@@ -509,6 +430,34 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
                 * n.snapshot_weightings.generators
             ).sum()
         )
+
+        # add non-European imports
+        incoming_shipping_ftfuel = n.links.index[
+            (n.links.carrier == "import shipping-ftfuel") &
+            (n.links.bus1.str[:2] == ct)
+        ]
+        incoming_shipping_meoh = n.links.index[
+            (n.links.carrier == "import shipping-meoh") &
+            (n.links.bus1.str[:2] == ct)
+        ]
+
+        lhs.append(
+                (
+                    -1
+                    * n.model["Link-p"].loc[:, incoming_shipping_meoh]
+                    / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
+                    * n.snapshot_weightings.generators
+                ).sum()
+            )
+
+        lhs.append(
+                (
+                    -1
+                    * n.model["Link-p"].loc[:, incoming_shipping_ftfuel]
+                    * 0.2571
+                    * n.snapshot_weightings.generators
+                ).sum()
+            )
 
         lhs = sum(lhs)
 
@@ -534,54 +483,6 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
             carrier_attribute="",
         )
 
-
-def force_boiler_profiles_existing_per_load(n):
-    """
-    This scales the boiler dispatch to the load profile with a factor common to
-    all boilers at load.
-    """
-
-    logger.info("Forcing boiler profiles for existing ones")
-
-    decentral_boilers = n.links.index[
-        n.links.carrier.str.contains("boiler")
-        & ~n.links.carrier.str.contains("urban central")
-        & ~n.links.p_nom_extendable
-    ]
-
-    if decentral_boilers.empty:
-        return
-
-    boiler_loads = n.links.loc[decentral_boilers, "bus1"]
-    boiler_loads = boiler_loads[boiler_loads.isin(n.loads_t.p_set.columns)]
-    decentral_boilers = boiler_loads.index
-    boiler_profiles_pu = n.loads_t.p_set[boiler_loads].div(
-        n.loads_t.p_set[boiler_loads].max(), axis=1
-    )
-    boiler_profiles_pu.columns = decentral_boilers
-    boiler_profiles = DataArray(
-        boiler_profiles_pu.multiply(n.links.loc[decentral_boilers, "p_nom"], axis=1)
-    )
-
-    boiler_load_index = pd.Index(boiler_loads.unique())
-    boiler_load_index.name = "Load"
-
-    # per load scaling factor
-    n.model.add_variables(coords=[boiler_load_index], name="Load-profile_factor")
-
-    # clumsy indicator matrix to map boilers to loads
-    df = pd.DataFrame(index=boiler_load_index, columns=decentral_boilers, data=0.0)
-    for k, v in boiler_loads.items():
-        df.loc[v, k] = 1.0
-
-    lhs = n.model["Link-p"].loc[:, decentral_boilers] - (
-        boiler_profiles * DataArray(df) * n.model["Load-profile_factor"]
-    ).sum("Load")
-
-    n.model.add_constraints(lhs, "=", 0, "Link-fixed_profile")
-
-    # hack so that PyPSA doesn't complain there is nowhere to store the variable
-    n.loads["profile_factor_opt"] = 0.0
 
 
 def force_boiler_profiles_existing_per_boiler(n):
@@ -630,104 +531,6 @@ def force_boiler_profiles_existing_per_boiler(n):
     n.links["fixed_profile_scaling_opt"] = 0.0
 
 
-def add_h2_derivate_limit(n, investment_year, limits_volume_max):
-    for ct in limits_volume_max["h2_derivate_import"]:
-        limit = limits_volume_max["h2_derivate_import"][ct][investment_year] * 1e6
-
-        logger.info(f"limiting H2 derivate imports in {ct} to {limit / 1e6} TWh/a")
-
-        incoming = n.links.loc[
-            [
-                "EU renewable oil -> DE oil",
-                "EU methanol -> DE methanol",
-                "EU renewable gas -> DE gas",
-            ]
-        ].index
-        outgoing = n.links.loc[
-            [
-                "DE renewable oil -> EU oil",
-                "DE methanol -> EU methanol",
-                "DE renewable gas -> EU gas",
-            ]
-        ].index
-
-        carrier_idx_dict = {
-            "renewable_oil": 0,
-            "methanol": 1,
-            "renewable_gas": 2,
-            "H2_derivate": [0, 1, 2],
-        }
-        for carrier, idx in carrier_idx_dict.items():
-            cname = f"{carrier}_import_limit-{ct}"
-
-            incoming_p = (
-                n.model["Link-p"].loc[:, incoming[idx]]
-                * n.snapshot_weightings.generators
-            ).sum()
-            outgoing_p = (
-                n.model["Link-p"].loc[:, outgoing[idx]]
-                * n.snapshot_weightings.generators
-            ).sum()
-
-            lhs = incoming_p - outgoing_p
-
-            n.model.add_constraints(lhs <= limit, name=f"GlobalConstraint-{cname}")
-
-            if cname in n.global_constraints.index:
-                logger.warning(
-                    f"Global constraint {cname} already exists. Dropping and adding it again."
-                )
-                n.global_constraints.drop(cname, inplace=True)
-
-            n.add(
-                "GlobalConstraint",
-                cname,
-                constant=limit,
-                sense="<=",
-                type="",
-                carrier_attribute="",
-            )
-
-    # Export bans on efuels are implemented in modify_prenetwork by restricting p_max_pu of the DE -> EU links
-
-
-def adapt_nuclear_output(n):
-    logger.info(
-        "limiting german electricity generation from nuclear to 2020 value of 61 TWh"
-    )
-    limit = 61e6
-
-    nuclear_de_index = n.links.index[
-        (n.links.carrier == "nuclear") & (n.links.index.str[:2] == "DE")
-    ]
-
-    nuclear_gen = (
-        n.model["Link-p"].loc[:, nuclear_de_index]
-        * n.links.loc[nuclear_de_index, "efficiency"]
-        * n.snapshot_weightings.generators
-    ).sum()
-
-    lhs = nuclear_gen
-
-    cname = "Nuclear_generation_limit-DE"
-
-    n.model.add_constraints(lhs <= limit, name=f"GlobalConstraint-{cname}")
-
-    if cname in n.global_constraints.index:
-        logger.warning(
-            f"Global constraint {cname} already exists. Dropping and adding it again."
-        )
-        n.global_constraints.drop(cname, inplace=True)
-
-    n.add(
-        "GlobalConstraint",
-        cname,
-        constant=limit,
-        sense="<=",
-        type="",
-        carrier_attribute="",
-    )
-
 
 def additional_functionality(n, snapshots, snakemake):
     logger.info("Adding Ariadne-specific functionality")
@@ -745,22 +548,11 @@ def additional_functionality(n, snapshots, snakemake):
 
     add_power_limits(n, investment_year, constraints["limits_power_max"])
 
-    if snakemake.wildcards.clusters != "1":
+    if constraints["limits_volume_max"]["h2_import"]:
         h2_import_limits(n, investment_year, constraints["limits_volume_max"])
 
-        electricity_import_limits(n, investment_year, constraints["limits_volume_max"])
+    electricity_import_limits(n, investment_year, constraints["limits_volume_max"])
 
-    if investment_year >= 2025:
-        h2_production_limits(
-            n,
-            investment_year,
-            constraints["limits_volume_min"],
-            constraints["limits_volume_max"],
-        )
-
-    add_h2_derivate_limit(n, investment_year, constraints["limits_volume_max"])
-
-    # force_boiler_profiles_existing_per_load(n)
     force_boiler_profiles_existing_per_boiler(n)
 
     if isinstance(constraints["co2_budget_national"], dict):
@@ -772,6 +564,3 @@ def additional_functionality(n, snapshots, snakemake):
         )
     else:
         logger.warning("No national CO2 budget specified!")
-
-    if investment_year == 2020:
-        adapt_nuclear_output(n)

@@ -11,10 +11,13 @@ rule solve_sector_network:
             "sector", "co2_sequestration_potential", default=200
         ),
         custom_extra_functionality=input_custom_extra_functionality,
+        energy_year=config_provider("energy", "energy_totals_year"),
     input:
         network=resources(
-            "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.nc"
+            "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final_import.nc"
         ),
+        co2_totals_name=resources("co2_totals.csv"),
+        energy_totals=resources("energy_totals.csv"),
     output:
         network=RESULTS
         + "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.nc",

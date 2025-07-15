@@ -381,7 +381,7 @@ energy:
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#biomass
 biomass:
-  year: 2030
+  year: 2050
   scenario: ENS_Med
   classes:
     solid biomass:
@@ -883,7 +883,7 @@ industry:
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#costs
 costs:
-  year: 2030
+  year: 2050
   version: v0.10.1
   social_discountrate: 0.02
   fill_values:

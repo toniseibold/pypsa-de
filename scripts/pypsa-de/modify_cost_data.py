@@ -4,7 +4,12 @@ import re
 
 import pandas as pd
 
-from scripts._helpers import configure_logging, mock_snakemake
+from scripts._helpers import (
+    configure_logging,
+    set_scenario_config,
+    update_config_from_wildcards,
+    mock_snakemake,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +52,8 @@ if __name__ == "__main__":
             cost_horizon="mean",
             run="KN2045_Mix",
         )
+    set_scenario_config(snakemake)
+    update_config_from_wildcards(snakemake.config, snakemake.wildcards)
     configure_logging(snakemake)
 
     # read in cost data from technology-data library
