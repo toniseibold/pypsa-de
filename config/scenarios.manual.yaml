@@ -14,10 +14,7 @@ Base:
   solving:
     constraints:
       transport_fuels_only: true
-      limits_volume_max:
-        h2_import:
-          DE:
-            2050: 0
+      limit_h2_max: true
 
 EH:
   sector:
@@ -66,7 +63,227 @@ WHP:
       - hbi
       - ammonia
       - methanol
-      - HVC
+  solving:
+    constraints:
+      transport_fuels_only: false
+
+
+400Mt_seq_Base:
+  sector:
+    relocation: []
+    co2_sequestration_potential:
+      2050: 400
+  import:
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+      limit_h2_max: true
+
+400Mt_seq_EH:
+  sector:
+    relocation: []
+  co2_sequestration_potential:
+      2050: 400
+  import:
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+400Mt_seq_WH:
+  sector:
+    relocation: []
+  co2_sequestration_potential:
+      2050: 400
+  import:
+    carriers:
+    - pipeline-h2
+    - shipping-lh2
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+400Mt_seq_EHP:
+  sector:
+    relocation:
+    - methanol
+    - ammonia
+    - hbi
+  co2_sequestration_potential:
+      2050: 400
+  import:
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+400Mt_seq_WHP:
+  sector:
+    relocation:
+      - hbi
+      - ammonia
+      - methanol
+    co2_sequestration_potential:
+      2050: 400
+  solving:
+    constraints:
+      transport_fuels_only: false
+
+50per_electrolysis_Base:
+  sector:
+    relocation: []
+  import:
+    trace_scenario: "low-electrolysis-50"
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+  costs:
+    electrolysis: 0.5
+  solving:
+    constraints:
+      transport_fuels_only: true
+      limit_h2_max: true
+
+50per_electrolysis_EH:
+  sector:
+    relocation: []
+  import:
+    trace_scenario: "low-electrolysis-50"
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+  costs:
+    electrolysis: 0.5
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+50per_electrolysis_WH:
+  sector:
+    relocation: []
+  import:
+    trace_scenario: "low-electrolysis-50"
+    carriers:
+    - pipeline-h2
+    - shipping-lh2
+    - shipping-ftfuel
+    - shipping-meoh
+  costs:
+    electrolysis: 0.5
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+50per_electrolysis_EHP:
+  sector:
+    relocation:
+    - methanol
+    - ammonia
+    - hbi
+  import:
+    trace_scenario: "low-electrolysis-50"
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+  costs:
+    electrolysis: 0.5
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+50per_electrolysis_WHP:
+  sector:
+    relocation:
+      - hbi
+      - ammonia
+      - methanol
+  import:
+    trace_scenario: "low-electrolysis-50"
+  costs:
+    electrolysis: 0.5
+  solving:
+    constraints:
+      transport_fuels_only: false
+
+wacc_10_Base:
+  sector:
+    relocation: []
+  import:
+    trace_scenario: "wacc_10"
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+      limit_h2_max: true
+
+wacc_10_EH:
+  sector:
+    relocation: []
+  import:
+    trace_scenario: "wacc_10"
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+wacc_10_WH:
+  sector:
+    relocation: []
+  import:
+    trace_scenario: "wacc_10"
+    carriers:
+    - pipeline-h2
+    - shipping-lh2
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+wacc_10_EHP:
+  sector:
+    relocation:
+    - methanol
+    - ammonia
+    - hbi
+  import:
+    trace_scenario: "wacc_10"
+    carriers:
+    - shipping-ftfuel
+    - shipping-meoh
+
+  solving:
+    constraints:
+      transport_fuels_only: true
+
+wacc_10_WHP:
+  sector:
+    relocation:
+      - hbi
+      - ammonia
+      - methanol
+  import:
+    trace_scenario: "wacc_10"
   solving:
     constraints:
       transport_fuels_only: false

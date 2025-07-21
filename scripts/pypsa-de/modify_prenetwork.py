@@ -402,7 +402,7 @@ def unravel_oil(n):
         ],
         bus1=["DE oil", "EU oil"],
         carrier="renewable oil",
-        p_nom=1e6,
+        p_nom=4e4,
         p_min_pu=0,
         marginal_cost=0.5,
     )
@@ -479,13 +479,13 @@ def unravel_meoh(n, costs):
     # add links between methanol buses
     n.add(
         "Link",
-        ["EU methanol -> DE methanol", "DE methanol -> EU methanol"],
-        bus0=["EU methanol", "DE methanol"],
-        bus1=["DE methanol", "EU methanol"],
+        "EU methanol -> DE methanol",
+        bus0="EU methanol",
+        bus1="DE methanol",
         carrier="methanol",
-        p_nom=1e6,
+        p_nom=2e4,
         p_min_pu=0,
-        marginal_cost=0.01,
+        marginal_cost=1.0,
     )
 
     if snakemake.params.efuel_export_ban:
@@ -614,7 +614,7 @@ def unravel_gasbus(n, costs):
     """
     logger.info("Unraveling gas bus")
 
-    if "DE" not in n.buses:
+    if "DE" not in n.buses.index:
         n.add("Bus", "DE", location="DE", x=10.5, y=51.2, carrier="none")
 
     ### create DE gas bus/generator/store
@@ -706,9 +706,9 @@ def unravel_gasbus(n, costs):
         bus0=["EU renewable gas", "DE renewable gas"],
         bus1=["DE gas", "EU gas"],
         carrier="renewable gas",
-        p_nom=1e6,
+        p_nom=5e3,
         p_min_pu=0,
-        marginal_cost=0.01,
+        marginal_cost=0.2,
     )
 
     if snakemake.params.efuel_export_ban:

@@ -340,6 +340,7 @@ rule modify_cost_data:
         NEP=config_provider("costs", "NEP"),
         planning_horizons=config_provider("scenario", "planning_horizons"),
         co2_price_add_on_fossils=config_provider("co2_price_add_on_fossils"),
+        electrolysis=config_provider("costs", "electrolysis"),
     input:
         modifications=lambda w: (
             "ariadne-data/costs_2019-modifications.csv"
@@ -994,6 +995,7 @@ rule modify_final_network:
         costs=config_provider("costs"),
         trace_scenario=config_provider("import", "trace_scenario"),
         transport_fuels_only=config_provider("solving", "constraints", "transport_fuels_only"),
+        limit_h2_max=config_provider("solving", "constraints", "limit_h2_max"),
     input:
         network=resources(
             "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final.nc"

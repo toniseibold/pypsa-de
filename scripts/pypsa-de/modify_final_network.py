@@ -354,6 +354,7 @@ def add_import_options(
     }
 
     trace_scenario = snakemake.params.trace_scenario
+    logger.info(f"Using the {trace_scenario} TRACE scenario.")
     import_costs = pd.read_csv(
         snakemake.input.import_costs, delimiter=";", keep_default_na=False
     ).query(
@@ -632,11 +633,11 @@ def relocate_ammonia(n, relocation_option):
         # add transport link between DE and EU
         n.add(
             "Link",
-            ["DE NH3 -> EU NH3", "EU NH3 -> DE NH3"],
-            bus0=["DE NH3", "EU NH3"],
-            bus1=["EU NH3", "DE NH3"],
+            "EU NH3 -> DE NH3",
+            bus0="EU NH3",
+            bus1="DE NH3",
             carrier="NH3",
-            p_nom=1e5,
+            p_nom=2e3,
             p_min_pu=0,
             marginal_cost=1.1,
         )
@@ -726,7 +727,7 @@ def consolidate_shipping_demand(n):
             bus1="DE shipping methanol",
             carrier="shipping methanol for bunkers",
             marginal_cost=1.0,
-            p_nom=1e4,
+            p_nom=3e3,
             )
 
 
@@ -795,8 +796,24 @@ if __name__ == "__main__":
             import_carriers=carriers,
         )
 
-    # restrict hydrogen pipeline expansion
-    ind = n.links[n.links.carrier=="H2 pipeline"].index
-    n.links.loc[ind, "p_nom_max"] = 20000
+    if snakemake.params.limit_h2_max:
+        logger.info("Deleting H2 interconnectors")
+        ind_in = n.links[
+            (n.links.carrier.str.contains("H2 pipeline")) & 
+            (n.links.bus0.str[:2] == "DE") &
+            (n.links.bus1.str[:2] != "DE")
+            ].index
+        ind_out = n.links[
+            (n.links.carrier.str.contains("H2 pipeline")) & 
+            (n.links.bus0.str[:2] != "DE") &
+            (n.links.bus1.str[:2] == "DE")
+            ].index
+        n.links.drop(ind_in, inplace=True)
+        n.links.drop(ind_out, inplace=True)
+    else:
+        logger.info("Limiting single H2 interconnectors to 20 GW")
+        # restrict hydrogen pipeline expansion
+        ind = n.links[n.links.carrier=="H2 pipeline"].index
+        n.links.loc[ind, "p_nom_max"] = 20000
 
     n.export_to_netcdf(snakemake.output.network)

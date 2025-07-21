@@ -6726,14 +6726,11 @@ def endogenise_steel(n, costs, sector_options, relocation_option):
     if relocation_option and "hbi" in relocation_option:
         n.add(
             "Link",
-            [
-                "EU hbi -> DE hbi",
-                "DE hbi -> EU hbi",
-            ],
-            bus0=["EU hbi", "DE hbi"],
-            bus1=["DE hbi", "EU hbi"],
-            carrier=["hbi", "hbi"],
-            p_nom=1e4,
+            "EU hbi -> DE hbi",
+            bus0="EU hbi",
+            bus1="DE hbi",
+            carrier="hbi",
+            p_nom=5e3,
             marginal_cost=5.5,
         )
 

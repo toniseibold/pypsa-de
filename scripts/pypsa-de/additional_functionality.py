@@ -48,7 +48,7 @@ def add_capacity_limits(n, investment_year, limits_capacity, sense="maximum"):
 
                 nom = n.model[c.name + "-" + attr + "_nom"].loc[extendable_index]
 
-                lhs = nom.sum()
+                lhs = nom.sum() / 1e3
 
                 cname = f"capacity_{sense}-{ct}-{c.name}-{carrier.replace(' ', '-')}"
 
@@ -58,7 +58,7 @@ def add_capacity_limits(n, investment_year, limits_capacity, sense="maximum"):
                     )
                     n.global_constraints.drop(cname, inplace=True)
 
-                rhs = limit - existing_capacity
+                rhs = (limit - existing_capacity) / 1e3
 
                 if sense == "maximum":
                     if rhs <= 0:
@@ -106,7 +106,7 @@ def add_power_limits(n, investment_year, limits_power_max):
         if investment_year not in limits_power_max[ct].keys():
             continue
 
-        limit = 1e3 * limits_power_max[ct][investment_year] / 10
+        limit = limits_power_max[ct][investment_year]
 
         logger.info(
             f"Adding constraint on electricity import/export from/to {ct} to be < {limit} MW"
@@ -146,7 +146,7 @@ def add_power_limits(n, investment_year, limits_power_max):
                 - outgoing_link_p.sum()
                 + incoming_line_p.sum()
                 - outgoing_line_p.sum()
-            ) / 10
+            ) / 1e3
             # divide by 10 to avoid numerical issues
 
             cname_upper = f"Power-import-limit-{ct}-{t}"
@@ -158,59 +158,9 @@ def add_power_limits(n, investment_year, limits_power_max):
             # not adding to network as the shadow prices are not needed
 
 
-def h2_import_limits(n, investment_year, limits_volume_max):
-    for ct in limits_volume_max["h2_import"]:
-        limit = limits_volume_max["h2_import"][ct][investment_year] * 1e6
-
-        logger.info(f"limiting H2 imports in {ct} to {limit / 1e6} TWh/a")
-        pipeline_carrier = [
-            "H2 pipeline",
-            "H2 pipeline (Kernnetz)",
-            "H2 pipeline retrofitted",
-        ]
-        incoming = n.links.index[
-            (n.links.carrier.isin(pipeline_carrier))
-            & (n.links.bus0.str[:2] != ct)
-            & (n.links.bus1.str[:2] == ct)
-        ]
-        outgoing = n.links.index[
-            (n.links.carrier.isin(pipeline_carrier))
-            & (n.links.bus0.str[:2] == ct)
-            & (n.links.bus1.str[:2] != ct)
-        ]
-
-        incoming_p = (
-            n.model["Link-p"].loc[:, incoming] * n.snapshot_weightings.generators
-        ).sum()
-        outgoing_p = (
-            n.model["Link-p"].loc[:, outgoing] * n.snapshot_weightings.generators
-        ).sum()
-
-        lhs = incoming_p - outgoing_p
-
-        cname = f"H2_import_limit-{ct}"
-
-        n.model.add_constraints(lhs <= limit, name=f"GlobalConstraint-{cname}")
-
-        if cname in n.global_constraints.index:
-            logger.warning(
-                f"Global constraint {cname} already exists. Dropping and adding it again."
-            )
-            n.global_constraints.drop(cname, inplace=True)
-
-        n.add(
-            "GlobalConstraint",
-            cname,
-            constant=limit,
-            sense="<=",
-            type="",
-            carrier_attribute="",
-        )
-
-
 def electricity_import_limits(n, investment_year, limits_volume_max):
     for ct in limits_volume_max["electricity_import"]:
-        limit = limits_volume_max["electricity_import"][ct][investment_year] * 1e6
+        limit = limits_volume_max["electricity_import"][ct][investment_year]
 
         if limit < 0:
             limit *= n.snapshot_weightings.generators.sum() / 8760
@@ -253,7 +203,7 @@ def electricity_import_limits(n, investment_year, limits_volume_max):
             n.model["Link-p"].loc[:, outgoing_link] * n.snapshot_weightings.generators
         ).sum()
 
-        lhs = (incoming_link_p - outgoing_link_p) + (incoming_line_p - outgoing_line_p)
+        lhs = ((incoming_link_p - outgoing_link_p) + (incoming_line_p - outgoing_line_p)) / 1e6
 
         cname = f"Electricity_import_limit-{ct}"
 
@@ -472,7 +422,8 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
                     ).sum()
                 )
 
-        lhs = sum(lhs)
+        lhs = sum(lhs) / 1e6
+        limit /= 1e6
 
         cname = f"co2_limit-{ct}"
 
@@ -560,9 +511,6 @@ def additional_functionality(n, snapshots, snakemake):
     )
 
     add_power_limits(n, investment_year, constraints["limits_power_max"])
-
-    if constraints["limits_volume_max"]["h2_import"]:
-        h2_import_limits(n, investment_year, constraints["limits_volume_max"])
 
     electricity_import_limits(n, investment_year, constraints["limits_volume_max"])
 

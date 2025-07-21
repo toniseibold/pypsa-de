@@ -4,13 +4,28 @@
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#run
 run:
-  prefix: import_07_12
+  prefix: import_07_18_sens
   name:
-    - Base
+    # - Base
     # - EH
     # - WH
     # - EHP
     # - WHP
+    - 400Mt_seq_Base
+    - 400Mt_seq_EH
+    - 400Mt_seq_WH
+    - 400Mt_seq_EHP
+    - 400Mt_seq_WHP
+    - 50per_electrolysis_Base
+    - 50per_electrolysis_EH
+    - 50per_electrolysis_WH
+    - 50per_electrolysis_EHP
+    - 50per_electrolysis_WHP
+    - wacc_10_Base
+    - wacc_10_EH
+    - wacc_10_WH
+    - wacc_10_EHP
+    - wacc_10_WHP
   scenarios:
     enable: true
     manual_file: config/scenarios.manual.yaml
@@ -261,6 +276,7 @@ costs:
   horizon: "mean" # "optimist", "pessimist" or "mean"
   NEP: 2021
   transmission: "overhead" # either overhead line ("overhead") or underground cable ("underground")
+  electrolysis: 1.0
 
 import:
   enable: true
@@ -622,7 +638,6 @@ solving:
             2050: 30
     # boundary condition of maximum volumes
     limits_volume_max:
-      h2_import: false
       # constrain electricity import in TWh
       electricity_import:
         DE:
@@ -630,6 +645,7 @@ solving:
     limits_power_max: # in GW
       DE:
         2050: 30
+    limit_h2_max: false
 
   solver_options:
     gurobi-default:

@@ -165,9 +165,11 @@ def plot_hydrogen_balance(n, colors, year, scenario, savepath):
     if "H2 pipeline (Kernnetz)" in nb.columns:
         nb["Trade"] = nb["H2 pipeline"] + nb["H2 pipeline (Kernnetz)"] + nb["H2 pipeline retrofitted"]
         nb.drop(columns=["H2 pipeline", "H2 pipeline (Kernnetz)", "H2 pipeline retrofitted"], inplace=True)
-    else:
+    elif "H2 pipeline" in nb.columns:
         nb["Trade"] = nb["H2 pipeline"] + nb["H2 pipeline retrofitted"]
         nb.drop(columns=["H2 pipeline", "H2 pipeline retrofitted"], inplace=True)
+    else:
+        nb["Trade"] = 0
     trade_bal = nb["Trade"].cumsum()
 
     # separate demand and supply of hydrogen
@@ -356,20 +358,20 @@ def get_import_volumes(n, year, non_eu_import, relocation):
     ###
     if relocation and "ammonia" in relocation:
         import_volumes.loc["ammonia EU in", year] = n.links_t.p0["EU NH3 -> DE NH3"].multiply(weights, axis=0).sum().sum()
-        import_volumes.loc["ammonia EU out", year] = -n.links_t.p0["DE NH3 -> EU NH3"].multiply(weights, axis=0).sum().sum()
+        import_volumes.loc["ammonia EU out", year] = 0 # -n.links_t.p0["DE NH3 -> EU NH3"].multiply(weights, axis=0).sum().sum()
     else:
         import_volumes.loc["ammonia EU in", year] = 0
         import_volumes.loc["ammonia EU out", year] = 0
     if relocation and "methanol" in relocation:
         import_volumes.loc["methanol EU in", year] = n.links_t.p0["EU methanol -> DE methanol"].multiply(weights, axis=0).sum().sum()
-        import_volumes.loc["methanol EU out", year] = -n.links_t.p0["DE methanol -> EU methanol"].multiply(weights, axis=0).sum().sum()
+        import_volumes.loc["methanol EU out", year] = 0 # -n.links_t.p0["DE methanol -> EU methanol"].multiply(weights, axis=0).sum().sum()
     else:
         ship_meoh = n.links[n.links.carrier=="shipping methanol for bunkers"].index
         import_volumes.loc["methanol EU in", year] = n.links_t.p0[ship_meoh].multiply(weights, axis=0).sum().sum()
         import_volumes.loc["methanol EU out", year] = 0
     if relocation and "hbi" in relocation:
         import_volumes.loc["hbi EU in", year] = n.links_t.p0["EU hbi -> DE hbi"].multiply(weights, axis=0).sum().sum() * 2.1
-        import_volumes.loc["hbi EU out", year] = -n.links_t.p0["DE hbi -> EU hbi"].multiply(weights, axis=0).sum().sum() * 2.1
+        import_volumes.loc["hbi EU out", year] = 0 # -n.links_t.p0["DE hbi -> EU hbi"].multiply(weights, axis=0).sum().sum() * 2.1
     else:
         import_volumes.loc["hbi EU in", year] = 0
         import_volumes.loc["hbi EU out", year] = 0
@@ -819,7 +821,7 @@ def plot_prices(networks, regions, years, scenario, relocation, savepath):
         fig.savefig(savepath + f"/{carrier}_price.png", bbox_inches="tight")
         plt.close()
 
-    emission_price = -n.global_constraints.loc["CO2Limit", "mu"] - n.global_constraints.loc["co2_limit-DE", "mu"]
+    emission_price = -n.global_constraints.loc["CO2Limit", "mu"] - (n.global_constraints.loc["co2_limit-DE", "mu"] / 1e6)
     data = pd.DataFrame(index=["HBI", "NH3", "methanol"], columns=["mean", "min", "max"])
     # make it demand weighted
     # demand weighted price steel
@@ -1873,7 +1875,7 @@ if __name__ == "__main__":
         # co2 price
         logger.info(f"CO2 emission shadow price {n.global_constraints.loc["CO2Limit", "mu"].round(2)} €/t)")
         # co2 price germany
-        logger.info(f"CO2 emission Germany shadow price {n.global_constraints.loc["co2_limit-DE", "mu"].round(2)} €/t)")
+        logger.info(f"CO2 emission Germany shadow price {n.global_constraints.loc["co2_limit-DE", "mu"].round(2) / 1e6} €/t)")
         # FT price EU
         logger.info(f"Renewable oil EU price {n.buses_t.marginal_price["EU renewable oil"].mean().round(2)} €/MWh)")
         # FT price Germany

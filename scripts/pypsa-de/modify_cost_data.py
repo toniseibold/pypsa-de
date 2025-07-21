@@ -179,4 +179,10 @@ if __name__ == "__main__":
     logger.info("Setting investment cost of hydrogen storage to 0.55 EUR/kWh.")
     costs.loc[("hydrogen storage underground", "investment"), "value"] = 0.55
 
+    if snakemake.params.electrolysis != 1.0:
+        logger.info(f"Changing electrolysis costs by multiplying CAPEX with {snakemake.params.electrolysis}")
+        logger.info(f"CAPEX before: {costs.loc[("electrolysis", "investment"), "value"]} €/MWh_electric")
+        costs.loc[("electrolysis", "investment"), "value"] *= snakemake.params.electrolysis
+        logger.info(f"CAPEX after: {costs.loc[("electrolysis", "investment"), "value"]} €/MWh_electric")
+
     costs.to_csv(snakemake.output[0])
