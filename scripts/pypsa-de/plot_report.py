@@ -91,16 +91,21 @@ scenario_dict = {
   "WH": "WH",
   "EHP": "EHP",
   "WHP": "WHP",
-#   "400Mt_seq_Base": "Base 400Mt Seq",
-#   "400Mt_seq_EH": "EH 400Mt Seq",
-#   "400Mt_seq_WH": "WH 400Mt Seq",
-#   "400Mt_seq_EHP": "EHP 400Mt Seq",
-#   "400Mt_seq_WHP": "WHP 400Mt Seq",
-#   "50per_electrolysis_Base": "Base -50%",
-#   "50per_electrolysis_EH": "EH -50%",
-#   "50per_electrolysis_WH": "WH -50%",
-#   "50per_electrolysis_EHP": "EHP -50%",
-#   "50per_electrolysis_WHP": "WHP -50%",
+  "400Mt_seq_Base": "Base 400Mt Seq",
+  "400Mt_seq_EH": "EH 400Mt Seq",
+  "400Mt_seq_WH": "WH 400Mt Seq",
+  "400Mt_seq_EHP": "EHP 400Mt Seq",
+  "400Mt_seq_WHP": "WHP 400Mt Seq",
+  "50per_electrolysis_Base": "Base -50%",
+  "50per_electrolysis_EH": "EH -50%",
+  "50per_electrolysis_WH": "WH -50%",
+  "50per_electrolysis_EHP": "EHP -50%",
+  "50per_electrolysis_WHP": "WHP -50%",
+  "wacc_10_Base": "Base wacc 10%",
+  "wacc_10_EH": "EH wacc 10%",
+  "wacc_10_WH": "WH wacc 10%",
+  "wacc_10_EHP": "EHP wacc 10%",
+  "wacc_10_WHP": "WHP wacc 10%",
 }
 
 def prepare_colors():
@@ -273,7 +278,7 @@ def plot_hydrogen_balance(n, colors, year, scenario, savepath):
 
 def plot_carbon_balance(n, colors, year, scenario, savepath):
 
-    co2_DE = n.statistics.energy_balance(bus_carrier="co2 stored", groupby=["bus", "carrier"]).filter(like="DE").groupby("carrier").sum().div(1e6).round(2)
+    co2_DE = n.statistics.energy_balance(bus_carrier="co2 stored", groupby=["bus", "carrier"]).filter(like="DE").groupby("carrier").sum().div(1e6)
     
     co2_DE.drop("CO2 pipeline", inplace=True)
 
@@ -392,15 +397,15 @@ def adjust_share(df, non_eu_carriers):
     # hydrogen
     if "pipeline-h2" in non_eu_carriers:
         h2_stat = n.statistics.supply(bus_carrier="H2").droplevel(0)
-        non_eu = h2_stat[["import infrastructure pipeline-h2", "import infrastructure shipping-lh2"]].sum()
+        non_eu = h2_stat[["import infrastructure pipeline-h2"]].sum()
         eu = h2_stat["H2 Electrolysis"]
         non_eu_share = non_eu / (non_eu + eu)
-        og_share = (df.loc["hydrogen non EU"] / (df.loc["hydrogen non EU"]+df.loc["hydrogen EU in"])).values[0]
-        if og_share < non_eu_share:
-            logger.info(f"Changing Non EU H2 share from {og_share*100} % to {non_eu_share*100} %")
-            total = df.loc["hydrogen non EU"] + df.loc["hydrogen EU in"]
-            df.loc["hydrogen non EU"] = total.values[0] * non_eu_share
-            df.loc["hydrogen EU in"] = total.values[0] * (1-non_eu_share)
+        plus = non_eu_share * df.loc["hydrogen EU in"]
+        logger.info(f"Moving {plus.loc["2050"]/1e6} TWh of H2 from European to non-European origin")
+        # subtract non-European H2 from European H2
+        df.loc["hydrogen EU in"] -= plus.loc["2050"]
+        # add non-European H2 to non-Eureopan H2
+        df.loc["hydrogen non EU"] += plus.loc["2050"]
     return df
 
 
@@ -789,7 +794,7 @@ def plot_prices(networks, regions, years, scenario, relocation, savepath):
                 regions[carrier] = marginal_prices.loc[f"EU {carrier}"]
                 regions.loc[reg_EU, carrier] = marginal_prices.loc[f"DE {carrier}"]
             else:
-                regions[carrier] = marginal_prices.values.round(2)
+                regions[carrier] = marginal_prices.values
             
             regions = regions.to_crs(proj.proj4_init)
             unit = "€/t" if carrier=="steel" else "€/MWh"
@@ -891,6 +896,10 @@ def plot_non_eu_import_balance(networks, years, scenario, savepath):
         for carrier in non_eu_carriers:
             ind = n.links[n.links.carrier==carrier].index
             import_vol.loc[carrier, years[i]] = n.links_t.p1[ind].mul(sw, axis=0).sum(axis=1).sum()
+
+        import_vol.loc["fossil oil", years[i]] = n.links_t.p1[['EU oil refining', 'DE oil refining']].mul(sw, axis=0).sum(axis=1).sum()
+
+        import_vol.loc["fossil gas", years[i]] = n.links_t.p1[['EU gas compressing', 'DE gas compressing']].mul(sw, axis=0).sum(axis=1).sum()
 
     import_vol = import_vol.abs().div(1e6) # .round(2) # .sort_values()
     import_vol = import_vol.loc[:, (import_vol != 0).any(axis=0)]
@@ -1583,7 +1592,7 @@ def plot_h2_pipeline_loading(n, tech_colors, scenario, savepath):
     nice_names = True
     energy_balance_df = s.energy_balance(
         nice_names=nice_names, bus_carrier=carrier, groupby=grouper
-    ).round(2)
+    )
     # remove energy balance of transmission carriers, which are relate to losses
     transmission_carriers = get_transmission_carriers(n, bus_carrier=carrier).rename(
         {"name": "carrier"}
@@ -1615,7 +1624,7 @@ def plot_h2_pipeline_loading(n, tech_colors, scenario, savepath):
     bus_sizes = bus_sizes.sort_values(ascending=False)
 
     # line and links widths according to optimal capacity
-    flow = s.transmission(groupby=False, bus_carrier=carrier).div(conversion).round(2)
+    flow = s.transmission(groupby=False, bus_carrier=carrier).div(conversion)
 
     if not flow.index.get_level_values(1).empty:
         flow_reversed_mask = flow.index.get_level_values(1).str.contains("reversed")
@@ -1629,7 +1638,7 @@ def plot_h2_pipeline_loading(n, tech_colors, scenario, savepath):
     link_widths = link_widths.abs().sort_values()
 
     # get average line loading of pipeline links
-    link_loading = s.capacity_factor(comps="Link", groupby=False, bus_carrier=carrier).round(2)
+    link_loading = s.capacity_factor(comps="Link", groupby=False, bus_carrier=carrier)
     link_loading = link_loading.loc[link_loading.index.get_level_values(0).str.contains("pipeline")]
     link_loading = link_loading.groupby(lambda x: x.replace("-reversed", ""), axis=0).mean()
 
@@ -1873,20 +1882,20 @@ if __name__ == "__main__":
         )
         # print out some general information:
         # co2 price
-        logger.info(f"CO2 emission shadow price {n.global_constraints.loc["CO2Limit", "mu"].round(2)} €/t)")
+        logger.info(f"CO2 emission shadow price {n.global_constraints.loc["CO2Limit", "mu"]} €/t)")
         # co2 price germany
-        logger.info(f"CO2 emission Germany shadow price {n.global_constraints.loc["co2_limit-DE", "mu"].round(2) / 1e6} €/t)")
+        logger.info(f"CO2 emission Germany shadow price {n.global_constraints.loc["co2_limit-DE", "mu"] / 1e6} €/t)")
         # FT price EU
-        logger.info(f"Renewable oil EU price {n.buses_t.marginal_price["EU renewable oil"].mean().round(2)} €/MWh)")
+        logger.info(f"Renewable oil EU price {n.buses_t.marginal_price["EU renewable oil"].mean()} €/MWh)")
         # FT price Germany
-        logger.info(f"Renewable oil Germany price {n.buses_t.marginal_price["DE renewable oil"].mean().round(2)} €/MWh)")
+        logger.info(f"Renewable oil Germany price {n.buses_t.marginal_price["DE renewable oil"].mean()} €/MWh)")
 
         weights = n.snapshot_weightings.generators
         logger.info("CH4 Consumption Germany")
         for carrier in n.links[n.links.bus0=="DE gas"].carrier.unique():
             ind = n.links[(n.links.carrier==carrier) & (n.links.index.str.startswith("DE"))].index
             cons = n.links_t.p0[ind].mul(weights, axis=0).sum().sum()/1e6
-            logger.info(f"{carrier}: {cons.round(2)} TWh")
+            logger.info(f"{carrier}: {cons} TWh")
 
     print_h2_FT_info(networks[-1])
     print_RE_info(networks[-1])
@@ -1917,7 +1926,7 @@ if __name__ == "__main__":
         savepath=snakemake.output.cons_cost,
         )
 
-    regions = gpd.read_file("/home/toni-seibold/dev/pypsa-de/resources/import_07_12/Base/regions_onshore_base_s_68.geojson").set_index("name")
+    regions = gpd.read_file("/home/toni-seibold/dev/pypsa-de-import/resources/regions_onshore_base_s_68.geojson").set_index("name")
     regions["country"] = regions.index.str[:2]
     colormaps(
         networks,
@@ -1955,7 +1964,7 @@ if __name__ == "__main__":
         non_eu_import = networks[-1].statistics.withdrawal(bus_carrier="export", groupby=["bus"]).droplevel("component")
         non_eu_import.index = non_eu_import.index.str.replace(" export", "", regex=False)
         
-        non_eu_import = non_eu_import.div(1e6).sort_values().round(2)
+        non_eu_import = non_eu_import.div(1e6).sort_values()
         logger.info("Countries with the highest exports to Europe in 2050 [TWh]:")
         logger.info(non_eu_import[-5:])
 
@@ -1965,18 +1974,18 @@ if __name__ == "__main__":
             savepath=snakemake.output.report + "/h2_transmission.svg",
         )
 
-    plot_h2_pipeline_loading(
-            networks[-1],
-            tech_colors=colors,
-            scenario=scenario,
-            savepath=snakemake.output.report + "/h2_transmission_loading.svg")
+    # plot_h2_pipeline_loading(
+    #         networks[-1],
+    #         tech_colors=colors,
+    #         scenario=scenario,
+    #         savepath=snakemake.output.report + "/h2_transmission_loading.svg")
 
-    # TODO: add sequestration
-    plot_hydrogen_carbon_map(
-        n=networks[-1],
-        regions=regions,
-        year=modelyears[-1],
-        scenario=scenario,
-        savepath=snakemake.output.map,
-    )
-    # TODO: stranded assets map
+    # # TODO: add sequestration
+    # plot_hydrogen_carbon_map(
+    #     n=networks[-1],
+    #     regions=regions,
+    #     year=modelyears[-1],
+    #     scenario=scenario,
+    #     savepath=snakemake.output.map,
+    # )
+    # # TODO: stranded assets map

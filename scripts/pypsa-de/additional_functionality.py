@@ -359,19 +359,19 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
                     * n.snapshot_weightings.generators
                 ).sum()
             )
-        else:
-            incoming_methanol = n.links.index[
-                n.links.index == f"EU shipping meoh -> DE shipping meoh"
-            ]
+        # else:
+        #     incoming_methanol = n.links.index[
+        #         n.links.index == f"EU shipping meoh -> DE shipping meoh"
+        #     ]
 
-            lhs.append(
-                (
-                    -1
-                    * n.model["Link-p"].loc[:, incoming_methanol]
-                    / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
-                    * n.snapshot_weightings.generators
-                ).sum()
-            )
+        #     lhs.append(
+        #         (
+        #             -1
+        #             * n.model["Link-p"].loc[:, incoming_methanol]
+        #             / snakemake.config["sector"]["MWh_MeOH_per_tCO2"]
+        #             * n.snapshot_weightings.generators
+        #         ).sum()
+        #     )
 
         # Methane
         incoming_CH4 = n.links.index[n.links.index == f"EU renewable gas -> {ct} gas"]

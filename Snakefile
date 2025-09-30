@@ -1044,30 +1044,10 @@ rule plot_report:
             **config["scenario"],
             allow_missing=True,
         ),
-        industry_sector_ratios=expand(
-            resources(
-                "industry_sector_ratios_{planning_horizons}.csv"
-            ),
-            **config["scenario"],
-            allow_missing=True,
-        ),
-        industrial_production=expand(
-            resources(
-                "industrial_production_base_s_{clusters}_{planning_horizons}.csv"
-            ),
-            **config["scenario"],
-            allow_missing=True,
-        ),
-        regions_onshore_clustered=expand(
-            resources("regions_onshore_base_s_{clusters}.geojson"),
-            clusters=config["scenario"]["clusters"],
-            allow_missing=True,
-        ),
     output:
         report=directory(RESULTS + "report"),
         import_vol=RESULTS + "report/import_volumes.png",
         cons_cost=RESULTS + "report/consumer_costs.png",
-        map=RESULTS + "report/h2_co2_map.png",
         revenue=RESULTS + "report/revenue.csv",
         hydrogen=RESULTS + "report/h2.csv",
         carbon=RESULTS + "report/co2.csv",

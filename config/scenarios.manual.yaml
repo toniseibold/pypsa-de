@@ -222,7 +222,7 @@ wacc_10_Base:
   sector:
     relocation: []
   import:
-    trace_scenario: "wacc_10"
+    trace_scenario: "wacc-10"
     carriers:
     - shipping-ftfuel
     - shipping-meoh
@@ -236,7 +236,7 @@ wacc_10_EH:
   sector:
     relocation: []
   import:
-    trace_scenario: "wacc_10"
+    trace_scenario: "wacc-10"
     carriers:
     - shipping-ftfuel
     - shipping-meoh
@@ -249,7 +249,7 @@ wacc_10_WH:
   sector:
     relocation: []
   import:
-    trace_scenario: "wacc_10"
+    trace_scenario: "wacc-10"
     carriers:
     - pipeline-h2
     - shipping-lh2
@@ -267,7 +267,7 @@ wacc_10_EHP:
     - ammonia
     - hbi
   import:
-    trace_scenario: "wacc_10"
+    trace_scenario: "wacc-10"
     carriers:
     - shipping-ftfuel
     - shipping-meoh
@@ -283,7 +283,7 @@ wacc_10_WHP:
       - ammonia
       - methanol
   import:
-    trace_scenario: "wacc_10"
+    trace_scenario: "wacc-10"
   solving:
     constraints:
       transport_fuels_only: false

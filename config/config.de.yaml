@@ -4,28 +4,28 @@
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#run
 run:
-  prefix: import_07_18_sens
+  prefix: import
   name:
-    # - Base
-    # - EH
-    # - WH
-    # - EHP
-    # - WHP
-    - 400Mt_seq_Base
-    - 400Mt_seq_EH
-    - 400Mt_seq_WH
-    - 400Mt_seq_EHP
-    - 400Mt_seq_WHP
-    - 50per_electrolysis_Base
-    - 50per_electrolysis_EH
-    - 50per_electrolysis_WH
-    - 50per_electrolysis_EHP
-    - 50per_electrolysis_WHP
-    - wacc_10_Base
-    - wacc_10_EH
-    - wacc_10_WH
-    - wacc_10_EHP
-    - wacc_10_WHP
+    - Base
+    - EH
+    - WH
+    - EHP
+    - WHP
+    # - 400Mt_seq_Base
+    # - 400Mt_seq_EH
+    # - 400Mt_seq_WH
+    # - 400Mt_seq_EHP
+    # - 400Mt_seq_WHP
+    # - 50per_electrolysis_Base
+    # - 50per_electrolysis_EH
+    # - 50per_electrolysis_WH
+    # - 50per_electrolysis_EHP
+    # - 50per_electrolysis_WHP
+    # - wacc_10_Base
+    # - wacc_10_EH
+    # - wacc_10_WH
+    # - wacc_10_EHP
+    # - wacc_10_WHP
   scenarios:
     enable: true
     manual_file: config/scenarios.manual.yaml
@@ -99,7 +99,7 @@ atlite:
 
 renewable:
   onwind:
-    capacity_per_sqkm: 1.4
+    capacity_per_sqkm: 3
     cutout: europe-2019-sarah3-era5
     correction_factor: 0.95
     resource:
@@ -122,7 +122,7 @@ renewable:
           hub_height: 100.
           P: 3.06
   offwind-ac:
-    capacity_per_sqkm: 6
+    capacity_per_sqkm: 3
     landfall_length: 30
     cutout: europe-2019-sarah3-era5
     correction_factor: 0.95
@@ -146,7 +146,7 @@ renewable:
           hub_height: 140.
           P: 5.5
   offwind-dc:
-    capacity_per_sqkm: 6
+    capacity_per_sqkm: 3
     landfall_length: 30
     cutout: europe-2019-sarah3-era5
     correction_factor: 0.95
@@ -171,7 +171,7 @@ renewable:
           P: 5.5
   offwind-float: # disabled at the moment
     landfall_length: 30
-    capacity_per_sqkm: 6
+    capacity_per_sqkm: 3
     cutout: europe-2019-sarah3-era5
     correction_factor: 0.95
   solar:
@@ -232,7 +232,7 @@ clustering:
     'SK': 0.0147
     'XK': 0.0147
   temporal:
-    resolution_sector: 365H # 2190SEG
+    resolution_sector: 2190SEG
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#co2-budget
 co2_budget:
@@ -591,8 +591,8 @@ industry:
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#solving
 solving:
-  runtime: 12h
-  mem_mb: 70000 #30000 is OK for 22 nodes, 365H; 140000 for 22 nodes 3H; 400000 for 44 nodes 3H
+  runtime: 24h
+  mem_mb: 400000 #30000 is OK for 22 nodes, 365H; 140000 for 22 nodes 3H; 400000 for 44 nodes 3H
   options:
     assign_all_duals: true
     load_shedding: false
