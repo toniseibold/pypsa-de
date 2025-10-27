@@ -721,7 +721,7 @@ rule build_clustered_co2_sequestration_potentials:
         regions_offshore=resources("regions_offshore_base_s_{clusters}.geojson"),
     output:
         sequestration_potential=resources(
-            "co2_sequestration_potential_base_s_{clusters}.csv"
+            "co2_sequestration_potential_base_s_{clusters}.geojson"
         ),
     threads: 1
     resources:
@@ -839,7 +839,7 @@ rule build_industrial_production_per_country:
         ),
     threads: 8
     resources:
-        mem_mb=2000,
+        mem_mb=4000,
     log:
         logs("build_industrial_production_per_country.log"),
     benchmark:
@@ -989,7 +989,7 @@ rule build_industrial_energy_demand_per_country_today:
         ),
     threads: 8
     resources:
-        mem_mb=2000,
+        mem_mb=4000,
     log:
         logs("build_industrial_energy_demand_per_country_today.log"),
     benchmark:
@@ -1341,7 +1341,7 @@ rule prepare_sector_network:
             else []
         ),
         sequestration_potential=lambda w: (
-            resources("co2_sequestration_potential_base_s_{clusters}.csv")
+            resources("co2_sequestration_potential_base_s_{clusters}.geojson")
             if config_provider(
                 "sector", "regional_co2_sequestration_potential", "enable"
             )(w)
@@ -1438,6 +1438,9 @@ rule prepare_sector_network:
             resources("ates_potentials_base_s_{clusters}_{planning_horizons}.csv")
             if config_provider("sector", "district_heating", "ates", "enable")(w)
             else []
+        ),
+        industry_sector_ratios=resources(
+            "industry_sector_ratios_{planning_horizons}.csv"
         ),
     output:
         resources(

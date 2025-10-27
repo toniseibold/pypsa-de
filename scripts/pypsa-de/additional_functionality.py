@@ -636,17 +636,21 @@ def add_h2_derivate_limit(n, investment_year, limits_volume_max):
 
         logger.info(f"limiting H2 derivate imports in {ct} to {limit / 1e6} TWh/a")
 
+        if "EU shipping methanol" in n.buses.index:
+            suffix = "shipping "
+        else:
+            suffix = ""
         incoming = n.links.loc[
             [
                 "EU renewable oil -> DE oil",
-                "EU methanol -> DE methanol",
+                f"EU {suffix}methanol -> DE {suffix}methanol",
                 "EU renewable gas -> DE gas",
             ]
         ].index
         outgoing = n.links.loc[
             [
                 "DE renewable oil -> EU oil",
-                "DE methanol -> EU methanol",
+                f"DE {suffix}methanol -> EU {suffix}methanol",
                 "DE renewable gas -> EU gas",
             ]
         ].index

@@ -1166,7 +1166,7 @@ def add_co2_atmosphere_constraint(n, snapshots):
 
 
 def extra_functionality(
-    n: pypsa.Network, snapshots: pd.DatetimeIndex, planning_horizons: str | None = None
+        n: pypsa.Network, snapshots: pd.DatetimeIndex, planning_horizons: str | None = None, snakemake = None,
 ) -> None:
     """
     Add custom constraints and functionality.
@@ -1280,6 +1280,7 @@ def solve_network(
     solving: dict,
     rule_name: str | None = None,
     planning_horizons: str | None = None,
+    snakemake = None,
     **kwargs,
 ) -> None:
     """
@@ -1327,7 +1328,7 @@ def solve_network(
     )
     kwargs["solver_name"] = solving["solver"]["name"]
     kwargs["extra_functionality"] = partial(
-        extra_functionality, planning_horizons=planning_horizons
+        extra_functionality, planning_horizons=planning_horizons, snakemake=snakemake,
     )
     kwargs["transmission_losses"] = cf_solving.get("transmission_losses", False)
     kwargs["linearized_unit_commitment"] = cf_solving.get(
@@ -1349,8 +1350,10 @@ def solve_network(
         logger.info("No expandable lines found. Skipping iterative solving.")
 
     # add to network for extra_functionality
-    n.config = config
-    n.params = params
+    if not hasattr(n, "config"):
+        n.config = config
+    if not hasattr(n, "params"):
+        n.params = params
 
     if rolling_horizon and rule_name == "solve_operations_network":
         kwargs["horizon"] = cf_solving.get("horizon", 365)
@@ -1399,12 +1402,14 @@ if __name__ == "__main__":
         from scripts._helpers import mock_snakemake
 
         snakemake = mock_snakemake(
-            "solve_sector_network",
+            "solve_operations_sector_network",
             opts="",
-            clusters="5",
-            configfiles="config/test/config.overnight.yaml",
-            sector_opts="",
-            planning_horizons="2030",
+            clusters="49",
+            configfiles="config/config.de.yaml",
+            sector_opts="none",
+            planning_horizons="2035",
+            column="frozen_H2_27",
+            run="pcipmi_H2_+",
         )
     configure_logging(snakemake)
     set_scenario_config(snakemake)
@@ -1440,6 +1445,7 @@ if __name__ == "__main__":
             planning_horizons=planning_horizons,
             rule_name=snakemake.rule,
             log_fn=snakemake.log.solver,
+            snakemake=snakemake,
         )
 
     logger.info(f"Maximum memory usage: {mem.mem_usage}")
@@ -1455,3 +1461,12 @@ if __name__ == "__main__":
             allow_unicode=True,
             sort_keys=False,
         )
+    
+    h2_links = n.links[n.links.carrier.str.contains("H2 pipeline")]
+    h2_links.to_csv(snakemake.output.h2_links)
+    co2_links = n.links[n.links.carrier.isin(["co2 sequestered", "CO2 pipeline"])]
+    co2_links.to_csv(snakemake.output.co2_links)
+    buses = n.buses[n.buses.carrier.isin(["co2 stored", "co2 sequestered"])]
+    buses.to_csv(snakemake.output.co2_buses)
+    stores = n.stores[n.stores.carrier.isin(["co2 stored", "co2 sequestered"])]
+    stores.to_csv(snakemake.output.co2_stores)

@@ -60,6 +60,7 @@ include: "rules/retrieve.smk"
 include: "rules/build_electricity.smk"
 include: "rules/build_sector.smk"
 include: "rules/solve_electricity.smk"
+include: "rules/solve_again.smk"
 include: "rules/postprocess.smk"
 include: "rules/development.smk"
 
@@ -81,6 +82,12 @@ if config["foresight"] == "perfect":
 
 rule all:
     input:
+        # perfect foresight
+        # expand(RESULTS + "networks/base_s_{clusters}_{opts}_{sector_opts}_brownfield_all_years.nc",
+        # run=config["run"]["name"],
+        # **config["scenario"],
+        # ),
+        # myopic foresight
         expand(RESULTS + "graphs/costs.svg", run=config["run"]["name"]),
         expand(resources("maps/power-network.pdf"), run=config["run"]["name"]),
         expand(
@@ -337,6 +344,7 @@ rule modify_cost_data:
         NEP=config_provider("costs", "NEP"),
         planning_horizons=config_provider("scenario", "planning_horizons"),
         co2_price_add_on_fossils=config_provider("co2_price_add_on_fossils"),
+        gas_price_factor=config_provider("costs", "gas_price_factor"),
     input:
         modifications=lambda w: (
             "ariadne-data/costs_2019-modifications.csv"
@@ -555,6 +563,12 @@ rule modify_prenetwork:
         bev_charge_rate=config_provider("sector", "bev_charge_rate"),
         bev_energy=config_provider("sector", "bev_energy"),
         bev_dsm_availability=config_provider("sector", "bev_dsm_availability"),
+        uba_for_industry=config_provider("iiasa_database", "uba_for_industry"),
+        scale_industry_non_energy=config_provider(
+            "iiasa_database", "scale_industry_non_energy"
+        ),
+        ammonia=config_provider("sector", "ammonia"),
+        industry_relocation=config_provider("sector", "industry_relocation"),
     input:
         costs_modifications="ariadne-data/costs_{planning_horizons}-modifications.csv",
         network=resources(
@@ -582,6 +596,13 @@ rule modify_prenetwork:
         regions_onshore=resources("regions_onshore_base_s_{clusters}.geojson"),
         regions_offshore=resources("regions_offshore_base_s_{clusters}.geojson"),
         offshore_connection_points="ariadne-data/offshore_connection_points.csv",
+        industrial_production_per_country_tomorrow=resources(
+            "industrial_production_per_country_tomorrow_{planning_horizons}-modified.csv"
+        ),
+        industry_sector_ratios=resources(
+            "industry_sector_ratios_{planning_horizons}.csv"
+        ),
+        new_industrial_energy_demand="ariadne-data/UBA_Projektionsbericht2025_Abbildung31_MWMS.csv",   
     output:
         network=resources(
             "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final.nc"

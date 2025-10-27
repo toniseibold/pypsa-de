@@ -41,11 +41,11 @@ if __name__ == "__main__":
     if "snakemake" not in globals():
         snakemake = mock_snakemake(
             "modify_cost_data",
-            planning_horizons="2020",
+            planning_horizons="2025",
             file_path="../data/costs/",
-            file_name="costs_2020.csv",
+            file_name="costs_2025.csv",
             cost_horizon="mean",
-            run="KN2045_Mix",
+            run="h2_network_27",
         )
     configure_logging(snakemake)
 
@@ -171,5 +171,16 @@ if __name__ == "__main__":
 
     logger.info("Setting investment cost of hydrogen storage to 0.55 EUR/kWh.")
     costs.loc[("hydrogen storage underground", "investment"), "value"] = 0.55
+
+    # from https://www.ffe.de/veroeffentlichungen/beitragsreihe-carbon-management-ccs-wie-kann-co2-transportiert-werden/
+    costs.loc[("CO2 pipeline", "FOM"), "value"] = 14
+    # from https://www.sciencedirect.com/science/article/pii/S0016236119311767
+    costs.loc[("grey methanol synthesis", "gas-input"), "value"] = 1.757469244
+    costs.loc[("grey methanol synthesis", "gas-input"), "unit"] = "Mwh_gas/Mwh_methanol"
+
+    logger.info(f"Adjusting gas price by factor {snakemake.params.gas_price_factor}")
+    logger.info(f"{costs.loc[("gas", "fuel"), "value"]} EUR/MWh")
+    costs.loc[("gas", "fuel"), "value"] *= snakemake.params.gas_price_factor
+    logger.info(f"{costs.loc[("gas", "fuel"), "value"]} EUR/MWh")
 
     costs.to_csv(snakemake.output[0])

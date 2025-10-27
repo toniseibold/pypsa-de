@@ -225,7 +225,8 @@ def add_wasserstoff_kernnetz(n, wkn, costs):
             costs.at["H2 (g) pipeline", "lifetime"],
             costs.at["H2 (g) pipeline repurposed", "lifetime"],
         )
-
+        if "H2 pipeline (Kernnetz)" not in n.carriers.index:
+            n.add("Carrier", "H2 pipeline (Kernnetz)")
         # add kernnetz to network
         n.add(
             "Link",
@@ -312,11 +313,11 @@ def unravel_carbonaceous_fuels(n):
     ### oil bus
     logger.info("Unraveling oil bus")
     # add buses
-    n.add("Carrier", "renewable oil")
+    n.add("Carrier", "renewable oil", unit="MWh_th")
 
     n.add("Bus", "DE", x=10.5, y=51.2, carrier="none")
-    n.add("Bus", "DE oil", location="DE", carrier="oil")
-    n.add("Bus", "DE oil primary", location="DE", carrier="oil primary")
+    n.add("Bus", "DE oil", location="DE", carrier="oil", unit="MWh_th")
+    n.add("Bus", "DE oil primary", location="DE", carrier="oil primary", unit="MWh_th")
     n.add(
         "Bus",
         "DE renewable oil",
@@ -458,6 +459,7 @@ def unravel_carbonaceous_fuels(n):
         "DE methanol",
         location="DE",
         carrier="methanol",
+        unit="MWh_th",
     )
 
     # change links from EU meoh to DE meoh
@@ -471,16 +473,17 @@ def unravel_carbonaceous_fuels(n):
     n.links.loc[DE_meoh_in, "bus1"] = "DE methanol"
 
     # add links between methanol buses
-    n.add(
-        "Link",
-        ["EU methanol -> DE methanol", "DE methanol -> EU methanol"],
-        bus0=["EU methanol", "DE methanol"],
-        bus1=["DE methanol", "EU methanol"],
-        carrier="methanol",
-        p_nom=1e6,
-        p_min_pu=0,
-        marginal_cost=0.01,
-    )
+    if snakemake.params.industry_relocation:
+        n.add(
+            "Link",
+            ["EU methanol -> DE methanol", "DE methanol -> EU methanol"],
+            bus0=["EU methanol", "DE methanol"],
+            bus1=["DE methanol", "EU methanol"],
+            carrier="methanol",
+            p_nom=1e6,
+            p_min_pu=0,
+            marginal_cost=0.01,
+        )
 
     if snakemake.params.efuel_export_ban:
         logger.info(
@@ -608,7 +611,7 @@ def unravel_gasbus(n, costs):
     """
     logger.info("Unraveling gas bus")
 
-    if "DE" not in n.buses:
+    if "DE" not in n.buses.index:
         n.add("Bus", "DE", location="DE", x=10.5, y=51.2, carrier="none")
 
     ### create DE gas bus/generator/store
@@ -617,6 +620,7 @@ def unravel_gasbus(n, costs):
         "DE gas",
         location="DE",
         carrier="gas",
+        unit="MWh_LHV",
     )
 
     n.add(
@@ -624,6 +628,7 @@ def unravel_gasbus(n, costs):
         "DE gas primary",
         location="DE",
         carrier="gas primary",
+        unit="MWh_LHV",
     )
 
     n.add(
@@ -662,7 +667,7 @@ def unravel_gasbus(n, costs):
     )
 
     ### create renewable gas buses
-    n.add("Carrier", "renewable gas")
+    n.add("Carrier", "renewable gas", unit="MWh_LHV")
 
     n.add(
         "Bus",
@@ -916,6 +921,8 @@ def add_hydrogen_turbines(n):
         ].index
         if gas_plants.empty:
             continue
+        elif f"H2 {carrier}" not in n.carriers.index:
+            n.add("Carrier", f"H2 {carrier}")
         h2_plants = n.links.loc[gas_plants].copy()
         h2_plants.carrier = h2_plants.carrier.str.replace(carrier, "H2 " + carrier)
         h2_plants.index = h2_plants.index.str.replace(carrier, "H2 " + carrier)
@@ -931,6 +938,8 @@ def add_hydrogen_turbines(n):
         & (n.links.index.str[:2] == "DE")
         & (n.links.p_nom_extendable)
     ].index
+    if "urban central H2 CHP" not in n.carriers.index:
+        n.add("Carrier", "urban central H2 CHP")
     h2_plants = n.links.loc[gas_plants].copy()
     h2_plants.carrier = h2_plants.carrier.str.replace("gas", "H2")
     h2_plants.index = h2_plants.index.str.replace("gas", "H2")
@@ -1255,17 +1264,382 @@ def scale_capacity(n, scaling):
                 ]
 
 
+def modify_industry_demand(
+    n,
+    year,
+    industry_energy_demand_file,
+    industry_production_file,
+    sector_ratios_file,
+    scale_non_energy=False,
+):
+    logger.info("Modifying industry demand in Germany.")
+
+    industry_production = pd.read_csv(
+        industry_production_file,
+        index_col="kton/a",
+    ).rename_axis("country")
+
+    sector_ratios = pd.read_csv(
+        sector_ratios_file,
+        header=[0, 1],
+        index_col=0,
+    ).rename_axis("carrier")
+
+    new_demand = pd.read_csv(
+        industry_energy_demand_file,
+        index_col=0,
+    )[str(year)].mul(1e6)
+
+    subcategories = ["HVC", "Methanol", "Chlorine"]
+    if not snakemake.params.ammonia:
+        logger.info("Ammonia not resolved. Adding to scale-down")
+        subcategories.append("Ammonia")
+    carrier = ["hydrogen", "methane", "naphtha"]
+
+    ip = industry_production.loc["DE", subcategories]  # kt/a
+    sr = sector_ratios["DE"].loc[carrier, subcategories]  # MWh/tMaterial
+    _non_energy = sr.multiply(ip).sum(axis=1) * 1e3
+
+    non_energy = pd.Series(
+        {
+            "industry electricity": 0.0,
+            "low-temperature heat for industry": 0.0,
+            "solid biomass for industry": 0.0,
+            "H2 for industry": _non_energy["hydrogen"],
+            "coal for industry": 0.0,
+            "gas for industry": _non_energy["methane"],
+            "naphtha for industry": _non_energy["naphtha"],
+        }
+    )
+
+    _industry_loads = [
+        "solid biomass for industry",
+        "gas for industry",
+        "H2 for industry",
+        "industry methanol",
+        "naphtha for industry",
+        "low-temperature heat for industry",
+        "industry electricity",
+        "coal for industry",
+    ]
+    industry_loads = n.loads.query(
+        f"carrier in {_industry_loads} and bus.str.startswith('DE')"
+    )
+
+    if scale_non_energy:
+        new_demand_without_non_energy = new_demand.sum()
+        pypsa_industry_without_non_energy = (
+            industry_loads.p_set.sum() * 8760 - non_energy.sum()
+        )
+        non_energy_scaling_factor = (
+            new_demand_without_non_energy / pypsa_industry_without_non_energy
+        )
+        logger.info(
+            f"Scaling non-energy use by {non_energy_scaling_factor:.2f} to match UBA data."
+        )
+        non_energy_corrected = non_energy * non_energy_scaling_factor
+        if snakemake.params.ammonia:
+            logger.info("Scaling Ammonia Load using non-energy scaling factor.")
+            nh3_loads = n.loads[(n.loads.carrier=="NH3") & (n.loads.index.str[:2]=="DE")].index
+            n.loads.loc[nh3_loads, "p_set"] *= non_energy_scaling_factor
+    else:
+        non_energy_corrected = non_energy
+
+    for carrier in [
+        "industry electricity",
+        "H2 for industry",
+        "solid biomass for industry",
+        "low-temperature heat for industry",
+    ]:
+        loads_i = n.loads.query(
+            f"carrier == '{carrier}' and bus.str.startswith('DE')"
+        ).index
+        logger.info(
+            f"Total load of {carrier} in DE before scaling: {n.loads.loc[loads_i, 'p_set'].sum()/1e6 * 8760:.2f} TWh/a"
+        )
+        total_load = industry_loads.p_set.loc[loads_i].sum() * 8760
+        scaling_factor = (
+            new_demand[carrier] + non_energy_corrected[carrier]
+        ) / total_load
+        n.loads.loc[loads_i, "p_set"] *= scaling_factor
+        logger.info(
+            f"Total load of {carrier} in DE after scaling: {n.loads.loc[loads_i, 'p_set'].sum()/1e6 * 8760:.2f} TWh/a"
+        )
+
+    # Fossil fuels are aggregated in UBA MWMS but have to be scaled separately
+    fossil_loads = industry_loads.query("carrier.str.contains('gas|coal|naphtha')")
+    fossil_totals = (
+        fossil_loads[["p_set", "carrier"]].groupby("carrier").p_set.sum() * 8760
+    )
+    fossil_energy = fossil_totals - non_energy[fossil_totals.index]
+    fossil_energy_corrected = fossil_energy * new_demand["fossil"] / fossil_energy.sum()
+    fossil_totals_corrected = (
+        fossil_energy_corrected + non_energy_corrected[fossil_totals.index]
+    )
+    for carrier in fossil_totals.index:
+        loads_i = fossil_loads.query(
+            f"carrier == '{carrier}' and bus.str.startswith('DE')"
+        ).index
+        n.loads.loc[loads_i, "p_set"] *= (
+            fossil_totals_corrected[carrier] / fossil_totals[carrier]
+        )
+
+
+def allow_cc_retrofit(n, costs):
+    carriers = [
+        'OCGT',
+        'CCGT',
+        'solid biomass',
+        'waste CHP',
+        'gas CHP',
+        'biomass CHP',
+        ]
+    
+    # add specific carriers and buses
+    buses_de = n.buses[(n.buses.carrier=="AC") & (n.buses.index.str[:2] == "DE")].index
+    n.add("Carrier", [carrier + " co2" for carrier in carriers])
+    n.add("Carrier", "CC")
+    for carrier in carriers:
+        co2_buses = [bus + " " + carrier + " co2" for bus in buses_de]
+        n.add("Bus",
+            co2_buses,
+            carrier=carrier + " co2",
+            location=buses_de,
+            unit="t_co2",
+            )
+
+        n.add("Link",
+            co2_buses,
+            bus0=co2_buses,
+            bus1="co2 atmosphere",
+            carrier="co2 vent",
+            p_nom=1000,
+            )
+
+        n.add("Link",
+            co2_buses,
+            suffix=" cc",
+            bus0=co2_buses,
+            bus1=buses_de + " co2 stored",
+            bus2=buses_de,
+            bus3="co2 atmosphere",
+            carrier="CC",
+            efficiency=costs.at["cement capture", "capture_rate"],
+            efficiency2=-costs.at["cement capture", "compression-electricity-input"],
+            efficiency3=1-costs.at["cement capture", "capture_rate"],
+            p_nom_extendable=True,
+            capital_cost=costs.at["cement capture", "capital_cost"],
+            )
+
+    # change bus1/bus2 for power and chp plants
+    for carrier in ['OCGT', 'CCGT', 'solid biomass']:
+        valid = n.links[(n.links.carrier==carrier) & (n.links.index.str[:2]=="DE")].index
+        # add new bus carrier + "co2 stored"
+        bus_names = [bus + " " + carrier + " co2" for bus in n.links.loc[valid, "bus1"]]
+        # change bus2 to co2_stored
+        n.links.loc[valid, "bus2"] = bus_names
+    chp_carrier={
+        'waste CHP': 'waste CHP',
+        'urban central gas CHP': 'gas CHP',
+        'urban central solid biomass CHP': 'biomass CHP',
+    }
+    for carrier in chp_carrier.keys():
+        valid = n.links[(n.links.carrier==carrier) & 
+                        (n.links.index.str[:2]=="DE") &
+                        (n.links.build_year != current_year)
+                        ].index
+        # add new bus carrier + "co2 stored"
+        bus_names = [bus + " " + chp_carrier[carrier] + " co2" for bus in n.links.loc[valid, "bus1"]]
+        # change bus2 to co2_stored
+        n.links.loc[valid, "bus2"] = bus_names
+
+
+def unravel_industry(n):
+    # change hbi buses
+    n.add(
+        "Bus",
+        "DE hbi",
+        location="DE",
+        carrier="hbi",
+        unit="t",
+    )
+
+    # change links from EU hbi to DE hbi
+    DE_hbi_out = n.links[
+        (n.links.bus1 == "EU hbi") & (n.links.index.str[:2] == "DE")
+    ].index
+    n.links.loc[DE_hbi_out, "bus1"] = "DE hbi"
+
+    DE_hbi_in = n.links[
+        (n.links.bus2 == "EU hbi") & (n.links.index.str[:2] == "DE")
+    ].index
+    n.links.loc[DE_hbi_in, "bus2"] = "DE hbi"
+
+    # add links between hbi buses
+    n.add(
+        "Link",
+        "EU hbi -> DE hbi",
+        bus0="EU hbi",
+        bus1="DE hbi",
+        carrier="hbi",
+        p_min_pu=0,
+        p_nom=5e3,
+        marginal_cost=5.5,
+    )
+
+    logger.info("Consolidate NH3 loads.")
+    # sum up NH3 loads for Germany to one
+    de_nh3 = n.loads[(n.loads.index.str.startswith("DE")) & (n.loads.carrier=="NH3")].index
+    p_set = n.loads.loc[de_nh3].p_set.sum()
+    # add DE NH3 bus
+    buses = n.buses[(n.buses.index.str.startswith("DE")) & (n.buses.carrier=="NH3")].index
+    n.add("Bus", "DE NH3", x=10.5, y=51.2, carrier="NH3")
+    n.add("Load",
+          "DE NH3",
+          bus="DE NH3",
+          carrier="NH3",
+          p_set=p_set,
+          )
+    # drop old loads
+    n.loads.drop(de_nh3, inplace=True)
+    # drop buses
+    n.buses.drop(buses, inplace=True)
+
+    # sum up NH3 loads for Europe to one
+    eu_nh3 = n.loads[(~n.loads.index.str.startswith("DE")) & (n.loads.carrier=="NH3")].index
+    p_set = n.loads.loc[eu_nh3].p_set.sum()
+    # add EU NH3 bus
+    buses = n.buses[(~n.buses.index.str.startswith("DE")) & (n.buses.carrier=="NH3")].index
+    n.add("Bus", "EU NH3", x=10.5, y=51.2, carrier="NH3")
+    n.add("Load", 
+          "EU NH3",
+          bus="EU NH3",
+          carrier="NH3",
+          p_set=p_set,
+          )
+    # drop old loads
+    n.loads.drop(eu_nh3, inplace=True)
+    # drop buses
+    n.buses.drop(buses, inplace=True)
+
+    # change NH3 link bus
+    links = n.links[(n.links.carrier=="Haber-Bosch") & (n.links.index.str[:2]=="DE")].index
+    n.links.loc[links, "bus1"] = "DE NH3"
+    links = n.links[(n.links.carrier=="ammonia cracker") & (n.links.index.str[:2]=="DE")].index
+    n.links.loc[links, "bus0"] = "DE NH3"
+
+    links = n.links[(n.links.carrier=="Haber-Bosch") & (n.links.index.str[:2]!="DE")].index
+    n.links.loc[links, "bus1"] = "EU NH3"
+    links = n.links[(n.links.carrier=="ammonia cracker") & (n.links.index.str[:2]!="DE")].index
+    n.links.loc[links, "bus0"] = "EU NH3"
+
+    # allow import of European NH3
+    n.add("Link",
+        "EU NH3 -> DE NH3",
+        bus0="EU NH3",
+        bus1="DE NH3",
+        carrier="NH3",
+        marginal_cost=1.1,
+        p_nom=2e3,
+        )
+    # take care of stores
+    stores = n.stores[n.stores.carrier=="ammonia store"].index
+    n.stores.drop(stores, inplace=True)
+    n.add(
+        "Store",
+        ["DE ammonia store", "EU ammonia store"],
+        bus=["DE NH3", "EU NH3"],
+        e_nom_extendable=True,
+        e_cyclic=True,
+        carrier="ammonia store",
+        capital_cost=costs.at[
+            "NH3 (l) storage tank incl. liquefaction", "capital_cost"
+        ],
+        overnight_cost=costs.at[
+            "NH3 (l) storage tank incl. liquefaction", "investment"
+        ],
+        lifetime=costs.at["NH3 (l) storage tank incl. liquefaction", "lifetime"],
+    )
+
+
+def consolidate_shipping_demand(n):
+    logger.info("Consolidate shipping methanol loads.")
+    # sum up shipping methanol loads for germany to one
+    de_meoh = n.loads[(n.loads.index.str.startswith("DE")) & (n.loads.carrier=="shipping methanol")].index
+    p_set = n.loads.loc[de_meoh].p_set.sum()
+    # add DE shipping bus
+    buses = n.buses[(n.buses.index.str.startswith("DE")) & (n.buses.carrier=="shipping methanol")].index
+    n.add("Bus", "DE shipping methanol", x=10.5, y=51.2, carrier="shipping methanol", unit="MWh_th")
+    n.add("Load",
+          "DE shipping methanol",
+          bus="DE shipping methanol",
+          carrier="shipping methanol",
+          p_set=p_set,
+          )
+    # drop old loads
+    n.loads.drop(de_meoh, inplace=True)
+    # drop buses
+    n.buses.drop(buses, inplace=True)
+
+    # sum up shipping methanol loads for Europe to one
+    eu_meoh = n.loads[(~n.loads.index.str.startswith("DE")) & (n.loads.carrier=="shipping methanol")].index
+    p_set = n.loads.loc[eu_meoh].p_set.sum()
+    # add EU shipping bus
+    buses = n.buses[(~n.buses.index.str.startswith("DE")) & (n.buses.carrier=="shipping methanol")].index
+    n.add("Bus", "EU shipping methanol", x=10.5, y=51.2, carrier="shipping methanol", unit="MWh_th")
+    n.add("Load", 
+          "EU shipping methanol",
+          bus="EU shipping methanol",
+          carrier="shipping methanol",
+          p_set=p_set,
+          )
+    # drop old loads
+    n.loads.drop(eu_meoh, inplace=True)
+    # drop buses
+    n.buses.drop(buses, inplace=True)
+
+    # replace shipping methanol link
+    n.add("Carrier", "shipping methanol")
+    links = n.links[n.links.carrier=="shipping methanol"].index
+    n.links.drop(links, inplace=True)
+    n.add("Link",
+          "DE shipping methanol",
+          bus0="DE methanol",
+          bus1="DE shipping methanol",
+          carrier="shipping methanol",
+          p_nom=1e4,
+          )
+    n.add("Link",
+          "EU shipping methanol",
+          bus0="EU methanol",
+          bus1="EU shipping methanol",
+          carrier="shipping methanol",
+          p_nom=1e5,
+          )
+
+    # allow import of European shipping methanol
+    n.add("Link",
+        ["EU shipping methanol -> DE shipping methanol", "DE shipping methanol -> EU shipping methanol"],
+        bus0=["EU shipping methanol", "DE shipping methanol"],
+        bus1=["DE shipping methanol", "EU shipping methanol"],
+        carrier="shipping methanol",
+        marginal_cost=1.0,
+        p_nom=3e3,
+        )
+
+
+
 if __name__ == "__main__":
     if "snakemake" not in globals():
         snakemake = mock_snakemake(
             "modify_prenetwork",
             simpl="",
-            clusters=27,
+            clusters=49,
             opts="",
             ll="vopt",
             sector_opts="none",
-            planning_horizons="2025",
-            run="KN2045_Mix",
+            planning_horizons="2035",
+            run="pcipmi_H2_+",
         )
 
     configure_logging(snakemake)
@@ -1334,6 +1708,24 @@ if __name__ == "__main__":
     force_connection_nep_offshore(n, current_year, costs)
 
     scale_capacity(n, snakemake.params.scale_capacity)
+
+    if snakemake.params.uba_for_industry and 2025 <= current_year < 2040:
+        modify_industry_demand(
+            n=n,
+            year=current_year,
+            industry_energy_demand_file=snakemake.input.new_industrial_energy_demand,
+            industry_production_file=snakemake.input.industrial_production_per_country_tomorrow,
+            sector_ratios_file=snakemake.input.industry_sector_ratios,
+            scale_non_energy=snakemake.params.scale_industry_non_energy,
+        )
+
+    if current_year > 2025:
+        allow_cc_retrofit(n, costs)
+
+    if snakemake.params.industry_relocation:
+        unravel_industry(n)
+    else:
+        consolidate_shipping_demand(n)
 
     sanitize_custom_columns(n)
 
