@@ -183,4 +183,14 @@ if __name__ == "__main__":
     costs.loc[("gas", "fuel"), "value"] *= snakemake.params.gas_price_factor
     logger.info(f"{costs.loc[("gas", "fuel"), "value"]} EUR/MWh")
 
+    # adjusting co2 pipeline costs
+    # 2140 EUR/m 40cm pipeline transporting 434 t/h
+    logger.info("Changing CO2 pipeline investment costs to 4930.9 EUR/(tCO2/h)/km (40cm diameter pipelines)")
+    costs.loc[("CO2 pipeline", "investment"), "value"] = 4930.9
+    costs.loc[("CO2 submarine pipeline", "investment"), "value"] = 4930.9*2
+
+    # logger.info("Changing CO2 pipeline investment costs to 2284.8 EUR/(tCO2/h)/km (70cm diameter pipelines)")
+    # costs.loc[("CO2 pipeline", "investment"), "value"] = 2284.8
+    # costs.loc[("CO2 submarine pipeline", "investment"), "value"] = 2284.8*2
+
     costs.to_csv(snakemake.output[0])

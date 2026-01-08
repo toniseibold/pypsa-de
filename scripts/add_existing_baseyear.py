@@ -1295,7 +1295,7 @@ def add_existing_steel_plants(
     )
 
     # add coal blast furnaces
-    coal_input = costs.at["blast furnace-basic oxygen furnace", "coal-input"]
+    coal_input = 5.34 # costs.at["blast furnace-basic oxygen furnace", "coal-input"]
     marginal_cost = (
         costs.at["iron ore DRI-ready", "commodity"]
         * costs.at["blast furnace-basic oxygen furnace", "ore-input"] / coal_input
@@ -1450,7 +1450,8 @@ def add_existing_meoh_plants(n):
         p_nom_extendable=False,
         p_nom=fh_meoh["Production in tons (calibrated)"]
         .mul(snakemake.params.MWh_MeOH_per_tMeOH)
-        .div(costs.at["grey methanol synthesis", "efficiency"]),
+        .div(costs.at["grey methanol synthesis", "efficiency"])
+        .div(8760),
         carrier="grey methanol",
         efficiency=costs.at["grey methanol synthesis", "efficiency"],
         efficiency2=co2_emissions,

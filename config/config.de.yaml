@@ -4,19 +4,12 @@
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#run
 run:
-  prefix: industry_short_term
+  prefix: xxxclusters
   name:
   - no_co2_network
   - frozen_H2_27
   - endo_H2
   - pcipmi_H2_+
-  - onshore_sequestration
-  - low_seq_potential
-  - high_seq_potential
-  - low_gas_price
-  - high_gas_price
-  - low_seq_cost
-  - high_seq_cost
   # not applicable for operations optimization yet
   # - european_relocation
   # - non_european_relocation
@@ -66,15 +59,15 @@ scenario:
   ll:
   - vopt
   clusters:
-  - 49 #current options: 27, 49
+  - 89
   opts:
   - ''
   sector_opts:
   - none
   planning_horizons:
-  # - 2025
+  - 2025
   - 2035
-  # - 2045
+  - 2045
 
 existing_capacities:
   grouping_years_power: [1920, 1950, 1955, 1960, 1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020]
@@ -196,49 +189,31 @@ lines:
     cutout: europe-2019-sarah3-era5
 
 clustering:
-  # simplify_network:
-  #   to_substations: true
-  # Code snippet for editing focus_weights
-  # fw = pd.Series(snakemake.config["clustering"]["focus_weights"])
-  # fw = fw.div(fw.min()).round()
-  # fw["ES"] = 1
-  # print(fw.div(fw.sum()).subtract(5e-5).round(4).to_dict().__repr__().replace(",","\n"))
-  focus_weights:
-  # 27 nodes: 8 for Germany, 3 for Italy, 2 each for Denmark, UK and Spain, 1 per each of other 10 "Stromnachbarn"
-    # 'DE': 0.2966
-    # 'AT': 0.0370
-    # 'BE': 0.0370
-    # 'CH': 0.0370
-    # 'CZ': 0.0370
-    # 'DK': 0.0741
-    # 'FR': 0.0370
-    # 'GB': 0.0741
-    # 'LU': 0.0370
-    # 'NL': 0.0370
-    # 'NO': 0.0370
-    # 'PL': 0.0370
-    # 'SE': 0.0370
-    # 'ES': 0.0741
-    # 'IT': 0.1111
-  # high spatial resolution: change clusters to 49
-  # 49 nodes: 30 for Germany, 3 for Italy, 2 each for Denmark, UK and Spain, 1 per each of other 10 "Stromnachbarn"
-    'DE': 0.6124
-    'AT': 0.0204
-    'BE': 0.0204
-    'CH': 0.0204
-    'CZ': 0.0204
-    'DK': 0.0408
-    'FR': 0.0204
-    'GB': 0.0408
-    'LU': 0.0204
-    'NL': 0.0204
-    'NO': 0.0204
-    'PL': 0.0204
-    'SE': 0.0204
-    'ES': 0.0408
-    'IT': 0.0612
+  mode: custom_busshapes
+  # 144 clusters for custom busmap 
+  # countries with sequestration potential: 'DE', 'DK', 'ES', 'GB', 'IT', 'NL', 'NO', 'PL', 'SE'
+  # focus_weights:
+  # # 128 nodes: 30 for Germany,
+  # mode: busmap
+  # administrative:
+  #   level: 1
+  #   # 'DE': 0.20833333333333332  # 16
+  #   # 'AT': 0.013888888888888888  # 2
+  #   # 'BE': 0.04861111111111111 # 7
+  #   # 'CH': 0.006944444444444444 # 1
+  #   # 'CZ': 0.013888888888888888  # 2
+  #   # 'DK': 0.04861111111111111 # 7
+  #   # 'FR': 0.1388888888888889  # 20
+  #   # 'GB': 0.0763888888888889 # 11
+  #   # 'LU': 0.006944444444444444 # 1
+  #   # 'NL': 0.04861111111111111 # 7
+  #   # 'NO': 0.04861111111111111 # 7
+  #   # 'PL': 0.04861111111111111 # 7
+  #   # 'SE': 0.04861111111111111 # 7
+  #   # 'ES': 0.1388888888888889  # 20
+  #   # 'IT': 0.10416666666666667 # 15
   temporal:
-    resolution_sector: 365H # 2190SEG
+    resolution_sector: 2190SEG # 25H
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#co2-budget
 co2_budget:
@@ -287,6 +262,7 @@ costs:
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#sector
 sector:
+  co2_network_cost_factor: 1
   industry_relocation: false
   methanol:
     regional_methanol_demand: true
@@ -474,7 +450,7 @@ industry:
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#solving
 solving:
   runtime: 24h
-  mem_mb: 70000 #30000 is OK for 22 nodes, 365H; 140000 for 22 nodes 3H; 400000 for 44 nodes 3H
+  mem_mb: 400000 #30000 is OK for 22 nodes, 365H; 140000 for 22 nodes 3H; 400000 for 44 nodes 3H
   options:
     assign_all_duals: true
     load_shedding: false
@@ -491,14 +467,14 @@ solving:
         gas pipeline new: 1500
         H2 pipeline: 4700
         H2 pipeline retrofitted: 4700
-        CO2 pipeline: 1712 # 80mm pipeline 15 Mt/a
+        CO2 pipeline: 434 # 434 t/h 40cm pipeline // 1712 t/h 80cm pipeline 15 Mt/a // 1328 t/h 70cm pipelines 11.63 Mt/a
       link_threshold:
         DC: 0.3
         gas pipeline: 0.3
         gas pipeline new: 0.3
         H2 pipeline: 0.05
         H2 pipeline retrofitted: 0.05
-        CO2 pipeline: 0.05
+        CO2 pipeline: 0.2
       fractional_last_unit_size: true
   constraints:
     # The default CO2 budget uses the KSG targets, and the non CO2 emissions from the REMIND model in the KN2045_Mix scenario
@@ -696,8 +672,8 @@ solving:
 solve_operations:
   columns:
     - no_co2_network
-    - frozen_H2_27
-    - endo_H2
+    # - frozen_H2_27
+    # - endo_H2
     - pcipmi_H2_+
     - onshore_sequestration
     - low_seq_potential

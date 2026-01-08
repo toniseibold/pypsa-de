@@ -1,6 +1,6 @@
 no_co2_network:
   sector:
-    co2_network: false
+    co2_network: true
 
 frozen_H2_27:
 # only h2 network with projects until 2027 are added

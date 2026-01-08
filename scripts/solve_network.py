@@ -1402,13 +1402,13 @@ if __name__ == "__main__":
         from scripts._helpers import mock_snakemake
 
         snakemake = mock_snakemake(
-            "solve_operations_sector_network",
+            "solve_sector_network_myopic",
             opts="",
-            clusters="49",
+            clusters="128",
             configfiles="config/config.de.yaml",
             sector_opts="none",
             planning_horizons="2035",
-            column="frozen_H2_27",
+            # column="pcipmi_",
             run="pcipmi_H2_+",
         )
     configure_logging(snakemake)
@@ -1421,6 +1421,18 @@ if __name__ == "__main__":
 
     n = pypsa.Network(snakemake.input.network)
     planning_horizons = snakemake.wildcards.get("planning_horizons", None)
+
+    # Debug
+    if snakemake.wildcards.run == "no_co2_network":
+        co2_pipes = n.links[(n.links.carrier=="CO2 pipeline") & ~(n.links.index.str.contains("offshore"))].index
+        n.links.loc[co2_pipes, "active"] = False
+    # co2_pipes = n.links.query("carrier == 'CO2 pipeline'")["build_year"]
+    # n.explore(
+    #     branch_components=["Link"],
+    #     link_width=co2_pipes,
+    #     auto_scale=True,
+    #     bus_size_max=True,
+    # )
 
     prepare_network(
         n,

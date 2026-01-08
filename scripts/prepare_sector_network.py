@@ -433,7 +433,9 @@ def create_network_topology(
     lk_attrs = n.links.columns.intersection(lk_attrs)
 
     candidates = pd.concat(
-        [n.lines[ln_attrs], n.links.loc[n.links.carrier.isin(carriers), lk_attrs]]
+        [n.lines[ln_attrs],
+         n.links.loc[(n.links.carrier.isin(carriers)) & (n.links.underwater_fraction > 0.1),
+         lk_attrs]]
     ).fillna(0)
 
     # base network topology purely on location not carrier
@@ -4494,7 +4496,7 @@ def add_biomass(
         transport_costs = pd.read_csv(biomass_transport_costs_file, index_col=0)
         transport_costs = transport_costs.squeeze()
         biomass_transport = create_network_topology(
-            n, "biomass transport ", bidirectional=False
+            n, "biomass transport ", carriers=[""], bidirectional=False
         )
 
         # costs
@@ -4925,7 +4927,14 @@ def adjust_industry_demand(nodes):
             "steel": ["Integrated steelworks", "DRI + Electric arc"],
             "cement": "Cement",
         }
-        keys = [sector_dict[k] for k in endogenous_sector if k in sector_dict]
+        keys = []
+
+        for k in endogenous_sector:
+            if k in sector_dict:
+                v = sector_dict[k]
+                keys.extend(v if isinstance(v, list) else [v])
+
+        # keys = [sector_dict[k] for k in endogenous_sector if k in sector_dict]
 
         remaining_sectors = ~nodal_df.index.get_level_values(1).isin(
             keys
@@ -5670,7 +5679,6 @@ def add_industry(
                 marginal_cost=marginal_cost,
                 p_nom=0,
                 p_nom_extendable=True,
-                p_min_pu=0.6,
                 bus0=spatial.nodes,
                 bus1=spatial.hbi.nodes,
                 bus2=spatial.h2.nodes,
@@ -5691,7 +5699,6 @@ def add_industry(
             capital_cost=costs.at["electric arc furnace", "capital_cost"] / electricity_input,
             p_nom=0,
             p_nom_extendable=True,
-            p_min_pu=0.6,
             bus0=spatial.nodes,
             bus1=spatial.steel.nodes,
             bus2=spatial.hbi.nodes,
@@ -5729,7 +5736,6 @@ def add_industry(
             marginal_cost=marginal_cost,
             p_nom=0,
             p_nom_extendable=True,
-            p_min_pu=0.6,
             bus0=spatial.gas.nodes,
             bus1=spatial.hbi.nodes,
             bus2=spatial.nodes + " gas DRI emission",
@@ -5739,7 +5745,7 @@ def add_industry(
         )
 
         # BOF
-        coal_input = costs.at["blast furnace-basic oxygen furnace", "coal-input"]
+        coal_input = 5.34 # costs.at["blast furnace-basic oxygen furnace", "coal-input"]
         marginal_cost = (
             costs.at["iron ore DRI-ready", "commodity"]
             * costs.at["blast furnace-basic oxygen furnace", "ore-input"] / coal_input
@@ -5761,7 +5767,6 @@ def add_industry(
             capital_cost=costs.at["blast furnace-basic oxygen furnace", "capital_cost"] / coal_input,
             p_nom=0,
             p_nom_extendable=True,
-            p_min_pu=0.6,
             marginal_cost=marginal_cost,
             bus0="EU coal",
             bus1=spatial.steel.nodes,
@@ -5811,7 +5816,6 @@ def add_industry(
                 efficiency=capture_rate,
                 efficiency2=-electricity_input,
                 efficiency3=1-capture_rate,
-                p_min_pu=0.6,
                 p_nom=0,
                 p_nom_extendable=True,
                 lifetime=costs.at["steel carbon capture retrofit", "lifetime"],
@@ -5829,7 +5833,6 @@ def add_industry(
                 efficiency=capture_rate,
                 efficiency2=-electricity_input,
                 efficiency3=1-capture_rate,
-                p_min_pu=0.6,
                 p_nom=0,
                 p_nom_extendable=True,
                 lifetime=costs.at["steel carbon capture retrofit", "lifetime"],
@@ -5840,6 +5843,7 @@ def add_industry(
         logger.info("Adding cement production capacities.")
         n.add("Carrier", "cement")
         n.add("Carrier", "clinker")
+        n.add("Carrier", "cement emission")
 
         cement.index = cement.index + " cement"
 
@@ -5863,7 +5867,7 @@ def add_industry(
             spatial.cement.nodes,
             suffix=" emission",
             location=spatial.cement.location,
-            carrier="cement",
+            carrier="cement emission",
             unit="t",
         )
 
@@ -5892,7 +5896,6 @@ def add_industry(
             bus3=spatial.cement.nodes + " emission",
             carrier="cement kiln",
             p_nom_extendable=True,
-            p_min_pu=0.6,
             capital_cost=costs.at["cement dry clinker", "capital_cost"] / gas_input,
             efficiency=1/gas_input,
             efficiency2=-electricity_input/gas_input,
@@ -5914,7 +5917,6 @@ def add_industry(
             bus2=spatial.nodes,
             carrier="cement finishing",
             p_nom_extendable=True,
-            p_min_pu=0.6,
             capital_cost=costs.at["cement finishing", "capital_cost"] / gas_input,
             efficiency=1/clinker_input,
             efficiency2=-electricity_input,
@@ -5937,14 +5939,12 @@ def add_industry(
                 bus3="co2 atmosphere",
                 carrier="cement emission CC",
                 p_nom_extendable=True,
-                p_min_pu=0.6,
                 capital_cost=costs.at["cement carbon capture retrofit", "capital_cost"],
                 efficiency=costs.at["cement carbon capture retrofit", "capture_rate"],
                 efficiency2=-electricity_input,
                 efficiency3=1-costs.at["cement carbon capture retrofit", "capture_rate"],
                 lifetime=costs.at["cement carbon capture retrofit", "lifetime"],
             )
-        n.add("Carrier", "cement emission")
         n.add(
             "Link",
             spatial.cement.nodes,
@@ -7181,11 +7181,11 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "prepare_sector_network",
             opts="",
-            clusters="49",
+            clusters="89",
             ll="vopt",
             sector_opts="none",
             planning_horizons="2035",
-            run="frozen_H2_27",
+            run="no_co2_network",
         )
 
     configure_logging(snakemake)  # pylint: disable=E0606
