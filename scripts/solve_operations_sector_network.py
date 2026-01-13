@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import pypsa
+from pathlib import Path
 from scripts._benchmark import memory_logger
 from scripts._helpers import (
     configure_logging,
@@ -120,13 +121,6 @@ def remove_pipelines(
     else:
         logger.warning(f"No {carrier}s found in the network.")
         return
-    if carrier == "CO2 pipeline":
-        buses = n.buses[n.buses.carrier.isin(["co2 stored", "co2 sequestered"])].index
-        n.buses.drop(buses, inplace=True)
-        stores = n.stores[n.stores.carrier.isin(["co2 stored", "co2 sequestered"])].index
-        n.stores.drop(stores, inplace=True)
-        links = n.links[n.links.carrier=="co2 sequestered"].index
-        n.links.drop(links, inplace=True)
 
 
 def add_pipeline_topology(n, c):
@@ -146,6 +140,7 @@ def add_pipeline_topology(n, c):
     logger.info(f"Adding CO2 buses of run {c}")
     fn = snakemake.input.co2_buses.replace(snakemake.wildcards.run, c)
     topology = pd.read_csv(fn, index_col=0)
+    n.buses.drop(n.buses[n.buses.carrier.isin(["co2 stored", "co2 sequestered"])].index, inplace=True)
     for name, row in topology.iterrows():
         n.add("Bus", name, **row.dropna().to_dict())
 
@@ -167,6 +162,7 @@ def add_pipeline_topology(n, c):
     topology.e_nom_extendable = False
     # save e_nom_opt to e_nom
     topology.loc[ext, "e_nom"] = topology.loc[ext, "e_nom_opt"]
+    n.stores.drop(n.stores[n.stores.carrier.isin(["co2 stored", "co2 sequestered"])].index, inplace=True)
     for name, row in topology.iterrows():
         n.add("Store", name, **row.dropna().to_dict())
 
@@ -179,7 +175,11 @@ def add_onshore_seq(n):
     annualiser = 25
 
     # Regional potential
-    sequestration_potential = gpd.read_file(fn).set_index("cluster")
+    if Path(fn).exists:
+        sequestration_potential = gpd.read_file(fn).set_index("cluster")
+    else:
+        logger.error(f"File for onshore potential {fn} does not exist. Please rerun basic workflow to create this file")
+        sys.exit()
 
     sequestration_potential["e_nom_max"] = (
         sequestration_potential["total_estimate_Mt"]
@@ -188,100 +188,72 @@ def add_onshore_seq(n):
         .div(annualiser)
         .clip(upper=upper_limit*1e6)
     )  # tpa
-    sequestration_potential.index = sequestration_potential.index + " co2 sequestered"
-    
-    # Add store buses
-    n.add(
-        "Bus",
-        sequestration_potential.index,
-        x=sequestration_potential.x,
-        y=sequestration_potential.y,
-        carrier="co2 sequestered",
-        unit="t_co2"
-    )
-
-    sequestration_potential.index = sequestration_potential.index.str.replace("sequestered", "stored")
-
-    # Note moved capital costs to OPEX in links connecting CO2 stores to sequestration sites
-    n.add(
-        "Store",
-        sequestration_potential.index,
-        e_nom_extendable=False,
-        e_nom=sequestration_potential["e_nom_max"],
-        marginal_cost=-0.1,
-        bus=sequestration_potential.index,
-        lifetime=50,
-        carrier="co2 sequestered",
-        build_year=snakemake.wildcards.planning_horizons,
-    )
-
-
-def remove_onshore_seq(n, c):
-    fn = snakemake.input.co2_sequestration_potential.replace("onshore_sequestration", c)
-
-    upper_limit = 25*1e3  # Mt
-    annualiser = 25
-
-    # Regional potential
-    sequestration_potential = gpd.read_file(fn).set_index("cluster")
-
-    sequestration_potential["e_nom_max"] = (
-        sequestration_potential["total_estimate_Mt"]
-        .fillna(0.0)
-        .mul(1e6)
-        .div(annualiser)
-        .clip(upper=upper_limit*1e6)
-    )  # tpa
-    sequestration_potential.index = sequestration_potential.index + " co2 sequestered"
-    # remove old buses
-    to_drop = n.buses[n.buses.carrier=="co2 sequestered"].index
-    n.buses.drop(to_drop, inplace=True)
-    # Add store buses
-    n.add(
-        "Bus",
-        sequestration_potential.index,
-        x=sequestration_potential.x,
-        y=sequestration_potential.y,
-        carrier="co2 sequestered",
-        unit="t_co2"
-    )
-
-    sequestration_potential.index = sequestration_potential.index.str.replace("sequestered", "stored")
-    # remove old stores
-    to_drop = n.stores[n.stores.carrier=="co2 sequestered"].index
-    n.stores.drop(to_drop, inplace=True)
-    # Note moved capital costs to OPEX in links connecting CO2 stores to sequestration sites
-    n.add(
-        "Store",
-        sequestration_potential.index,
-        e_nom_extendable=False,
-        e_nom=sequestration_potential["e_nom_max"],
-        marginal_cost=-0.1,
-        bus=sequestration_potential.index,
-        lifetime=50,
-        carrier="co2 sequestered",
-        build_year=snakemake.wildcards.planning_horizons,
-    )
+    seq_cost = n.links[n.links.carrier=="co2 sequestered"].marginal_cost.mean().round()
+    for seq_site in sequestration_potential.index:
+        if seq_site + " co2 sequestered" in n.buses.index:
+            # just adjust the potential
+            store_ind = n.stores[n.stores.bus==seq_site + " co2 sequestered"].index
+            n.stores.loc[store_ind, "e_nom"] = sequestration_potential.loc[seq_site, "e_nom_max"]
+        else:
+            # co2 storage bus
+            n.add(
+                "Bus",
+                seq_site + " co2 sequestered",
+                x=sequestration_potential.loc[seq_site, "x"],
+                y=sequestration_potential.loc[seq_site, "y"],
+                carrier="co2 sequestered",
+                unit="t_co2",
+            )
+            # storage
+            n.add(
+                "Store",
+                seq_site + " co2 sequestered",
+                e_nom_extendable=False,
+                e_nom=sequestration_potential.loc[seq_site, "e_nom_max"],
+                marginal_cost=-0.1,
+                bus=seq_site + " co2 sequestered",
+                lifetime=50,
+                carrier="co2 sequestered",
+                build_year=planning_horizons,
+            )
+            # link between stored and sequestered
+            n.add(
+                "Link",
+                seq_site,
+                bus0=sequestration_potential.loc[seq_site, "bus_onshore"] + " co2 stored",
+                bus1=seq_site + " co2 sequestered",
+                marginal_cost=seq_cost,
+                capital_cost=0.1,
+                carrier="co2 sequestered",
+                efficiency=1.0,
+                p_nom_extendable=True,
+                reversed=False,
+            )
 
 
-def align_outliers(n):
-    if snakemake.wildcards.run == "onshore_sequestration":
-        logger.info("Removing onshore sequestration potential")
-        remove_onshore_seq(n, c)
-    elif snakemake.wildcards.run in ["low_gas_price", "high_gas_price"]:
-        logger.info("Restoring medium gas price of 22.4 EUR/MWh")
-        n.generators.loc["EU gas primary", "marginal_cost"] = 22.4
-        n.generators.loc["DE gas primary", "marginal_cost"] = 22.4
-    elif snakemake.wildcards.run in ["low_seq_cost", "high_seq_cost"]:
-        logger.info("Restoring medium co2 sequestration cost of 35 EUR/t")
-        seq_links = n.links[n.links.carrier=="co2 sequestered"].index
-        n.links.loc[seq_links, "marginal_cost"] = 35
-        seq_stores = n.stores[n.stores.carrier=="co2 sequestered"].index
-        n.stores.loc[seq_stores, "capital_cost"] = 35
-    if snakemake.wildcards.run in ["low_seq_potential", "high_seq_potential"]:
-        logger.info("Restoring medium sequestration potential of 100 Mt/yr")
-        n.global_constraints.loc["co2_sequestration_limit", "constant"] = -100*1e6
+def fix_network(n):
+    carriers=[
+        "H2 pipeline",
+        "H2 pipeline (Kernnetz)",
+        "H2 pipeline retrofitted",
+        "CO2 pipeline",
+    ]
+    logger.info(f"Fixing the built capacity of {carriers}.")
+    net_links = n.links[n.links.carrier.isin(carriers)].index
+    n.links.loc[net_links, "p_nom"] = n.links.loc[net_links, "p_nom_opt"]
+    n.links.loc[net_links, "p_nom_extendable"] = False
 
+
+def add_co2_network(n):
+    # get the filename
+    fn = "/home/toni-seibold/dev/pypsa-de-co2/results/cluster/2025_10_31_25H/pcipmi_H2_+/topology/CO2_pipelines_base_s_49__none_2035.csv"
+    topology = pd.read_csv(fn, index_col=0)
+    # make non_extendable
+    topology.p_nom_extendable = False
+    # save p_nom_opt to p_nom
+    topology.p_nom = topology.p_nom_opt
+    for name, row in topology.iterrows():
+        n.add("Link", name, **row.dropna().to_dict())
 
 
 if __name__ == "__main__":
@@ -295,7 +267,7 @@ if __name__ == "__main__":
             sector_opts="none", 
             planning_horizons="2035",
             column="no_co2_network",
-            run="onshore_sequestration",
+            run="pcipmi_H2_+",
             configfiles="config/config.de.yaml",
         )
  
@@ -308,9 +280,9 @@ if __name__ == "__main__":
     config = snakemake.config
     solving = snakemake.params.solving
 
-    planning_horizons = snakemake.wildcards.get("planning_horizons", None)
+    planning_horizons = "2035"
     c = snakemake.wildcards.get("column", None)
-
+    snakemake.wildcards.planning_horizons = "2035"
     np.random.seed(solving.get("seed", 123))
 
     # Update solving options
@@ -321,23 +293,21 @@ if __name__ == "__main__":
     n = pypsa.Network(snakemake.input.network)
     # skip if the same
     if c == snakemake.wildcards.run:
-        logger.info(f"Skipping {c} for scenario {snakemake.wildcards.run}")
-        n.export_to_netcdf(snakemake.output[0])
-        sys.exit()
+        logger.info(f"Rerunning optimization without adjustments.")
 
-    align_outliers(n)
+    if {snakemake.wildcards.run, c} == {"pcipmi_H2_+", "no_co2_network"}:
+        remove_pipelines(n, carrier="CO2 pipeline")
+        remove_pipelines(n, carrier="H2 pipeline")
+        add_pipeline_topology(n, c)
 
-    # remove CO2 and H2 pipelines
-    remove_pipelines(n, carrier="CO2 pipeline")
-    remove_pipelines(n, carrier="H2 pipeline")
-    # add pipelines from column run
-    add_pipeline_topology(n, c)
+    else: 
+        fix_network(n)
 
     set_minimum_investment(n, planning_horizons)
 
     if c == "european_relocation" or c == "non_european_relocation":
         # make relocation
-        # TONI TODO:
+        # TONITODO:
         pass
     if c == "onshore_sequestration":
         # add onshore sequestration potentials
@@ -348,30 +318,34 @@ if __name__ == "__main__":
         n.generators.loc["EU gas primary", "marginal_cost"] = 22.4/2
         n.generators.loc["DE gas primary", "marginal_cost"] = 22.4/2
     if c == "high_gas_price":
-        logger.info("low gas price of 44.8 €/MWh")
+        logger.info("high gas price of 44.8 €/MWh")
         n.generators.loc["EU gas primary", "marginal_cost"] = 22.4*2
         n.generators.loc["DE gas primary", "marginal_cost"] = 22.4*2
     if c == "low_seq_cost":
+        logger.info("low sequestration costs of 17.5 €/t")
         seq_links = n.links[n.links.carrier=="co2 sequestered"].index
         n.links.loc[seq_links, "marginal_cost"] = 35/2
         seq_stores = n.stores[n.stores.carrier=="co2 sequestered"].index
         n.stores.loc[seq_stores, "capital_cost"] = 35/2
     if c == "high_seq_cost":
+        logger.info("low sequestration costs of 70 €/t")
         seq_links = n.links[n.links.carrier=="co2 sequestered"].index
         n.links.loc[seq_links, "marginal_cost"] = 35*2
         seq_stores = n.stores[n.stores.carrier=="co2 sequestered"].index
         n.stores.loc[seq_stores, "capital_cost"] = 35*2
     
     if c == "low_seq_potential":
+        logger.info("sequestration potential of 50 Mt/a")
         n.global_constraints.loc["co2_sequestration_limit", "constant"] = -50*1e6
     if c == "high_seq_potential":
+        logger.info("sequestration potential of 200 Mt/a")
         n.global_constraints.loc["co2_sequestration_limit", "constant"] = -200*1e6
 
     # # Debugging: Load shedding
-    # if snakemake.params.solve_operations["load_shedding"]:
-    #     config["solving"]["options"]["load_shedding"] = True
-    #     marginal_cost = 10000
-    #     add_load_shedding(n, marginal_cost)
+    # # if snakemake.params.solve_operations["load_shedding"]:
+    # config["solving"]["options"]["load_shedding"] = True
+    # marginal_cost = 10000
+    # add_load_shedding(n, marginal_cost)
 
     # #################################
 
@@ -396,6 +370,7 @@ if __name__ == "__main__":
             solving=solving,
             planning_horizons=planning_horizons,
             rule_name=rule_name,
+            log_fn=snakemake.log.solver,
             snakemake=snakemake,
         )
 

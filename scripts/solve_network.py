@@ -1404,12 +1404,12 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "solve_sector_network_myopic",
             opts="",
-            clusters="128",
+            clusters="89",
             configfiles="config/config.de.yaml",
             sector_opts="none",
             planning_horizons="2035",
             # column="pcipmi_",
-            run="pcipmi_H2_+",
+            run="no_co2_network",
         )
     configure_logging(snakemake)
     set_scenario_config(snakemake)
@@ -1433,6 +1433,11 @@ if __name__ == "__main__":
     #     auto_scale=True,
     #     bus_size_max=True,
     # )
+
+    if snakemake.params.solving["sweep"]["enable"] and snakemake.wildcards.planning_horizons=="2035":
+        # deactivate post discretization
+        snakemake.params.solving["options"]["skip_iterations"] = True
+        snakemake.params.solving["options"]["post_discretization"]["enable"] = False
 
     prepare_network(
         n,

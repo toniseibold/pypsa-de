@@ -13,31 +13,31 @@ rule solve_operations_sector_network:
         energy_year=config_provider("energy", "energy_totals_year"),
         foresight=config_provider("foresight"),
     input:
-        network=RESULTS + "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.nc",
+        network=RESULTS + "networks/base_s_{clusters}_{opts}_{sector_opts}_2035.nc",
         co2_totals_name=resources("co2_totals.csv"),
         energy_totals=resources("energy_totals.csv"),
         h2_links=RESULTS
-        + "topology/H2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        + "topology/H2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
         co2_links=RESULTS
-        + "topology/CO2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        + "topology/CO2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
         co2_buses=RESULTS
-        + "topology/CO2_buses_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        + "topology/CO2_buses_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
         co2_stores=RESULTS
-        + "topology/CO2_stores_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        + "topology/CO2_stores_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
         co2_sequestration_potential=resources("co2_sequestration_potential_base_s_{clusters}.geojson"),
     output:
-        network=RESULTS + "networks/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_{planning_horizons}.nc",
+        network=RESULTS + "networks/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035.nc",
     log:
         solver=RESULTS
-        + "logs/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_{planning_horizons}_solver.log",
+        + "logs/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035_solver.log",
         memory=RESULTS
-        + "logs/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_{planning_horizons}_memory.log",
+        + "logs/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035_memory.log",
         python=RESULTS
-        + "logs/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_{planning_horizons}_python.log",
+        + "logs/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035_python.log",
     benchmark:
         (
             RESULTS
-            + "benchmarks/solve_operations_sector_network/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_{planning_horizons}"
+            + "benchmarks/solve_operations_sector_network/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035"
         )
     threads: 4
     resources:
@@ -55,8 +55,18 @@ rule solve_operations_sector_networks:
     input:
         expand(
             RESULTS 
-            + "networks/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_{planning_horizons}.nc",
+            + "networks/operations/{column}/cost_de_{clusters}_{opts}_{sector_opts}_2035.csv",
             **config["scenario"],
             run=config["run"]["name"],
             column=config["solve_operations"]["columns"]
         ),
+
+rule get_de_costs:
+    input:
+        network=RESULTS + "networks/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035.nc"
+    output:
+        cost=RESULTS + "networks/operations/{column}/cost_de_{clusters}_{opts}_{sector_opts}_2035.csv"
+    log:
+        RESULTS + "logs/cost_de_{column}_{clusters}_{opts}_{sector_opts}_2035.log"
+    script:
+        "../scripts/pypsa-de/get_de_costs.py"

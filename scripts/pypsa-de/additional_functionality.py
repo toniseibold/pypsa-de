@@ -742,7 +742,10 @@ def adapt_nuclear_output(n):
 def additional_functionality(n, snapshots, snakemake):
     logger.info("Adding Ariadne-specific functionality")
 
-    investment_year = int(snakemake.wildcards.planning_horizons[-4:])
+    try:
+        investment_year = int(snakemake.wildcards.planning_horizons[-4:])
+    except:
+        investment_year = 2035
     constraints = snakemake.params.solving["constraints"]
 
     add_capacity_limits(

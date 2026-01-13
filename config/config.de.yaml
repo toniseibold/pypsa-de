@@ -6,10 +6,10 @@
 run:
   prefix: xxxclusters
   name:
-  - no_co2_network
-  - frozen_H2_27
+  # - no_co2_network
+  # - frozen_H2_27
   - endo_H2
-  - pcipmi_H2_+
+  # - pcipmi_H2_+
   # not applicable for operations optimization yet
   # - european_relocation
   # - non_european_relocation
@@ -67,7 +67,7 @@ scenario:
   planning_horizons:
   - 2025
   - 2035
-  - 2045
+  # - 2045
 
 existing_capacities:
   grouping_years_power: [1920, 1950, 1955, 1960, 1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020]
@@ -213,7 +213,7 @@ clustering:
   #   # 'ES': 0.1388888888888889  # 20
   #   # 'IT': 0.10416666666666667 # 15
   temporal:
-    resolution_sector: 2190SEG # 25H
+    resolution_sector: 365H # 2190SEG # 25H
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#co2-budget
 co2_budget:
@@ -669,12 +669,23 @@ solving:
   #     FeasibilityTol: 1.e-4
   #     BarHomogeneous: 1
 
+  sweep:
+    enable: True
+    diameter:
+      - 40
+      - 70
+    threshold:
+      - 0.05
+      - 0.1
+      - 0.15
+      - 0.2
+
 solve_operations:
   columns:
-    - no_co2_network
+    # - no_co2_network
     # - frozen_H2_27
     # - endo_H2
-    - pcipmi_H2_+
+    # - pcipmi_H2_+
     - onshore_sequestration
     - low_seq_potential
     - high_seq_potential
