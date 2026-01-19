@@ -1,6 +1,6 @@
 no_co2_network:
   sector:
-    co2_network: true
+    co2_network: true # deactivated in solve_network
 
 frozen_H2_27:
 # only h2 network with projects until 2027 are added
@@ -18,6 +18,8 @@ endo_H2:
   wasserstoff_kernnetz:
     enable: false
     force_all_ipcei_pci: false
+  pcipmi_projects:
+    enable: false
 
 pcipmi_H2_+:
 # forcing all pcipmi projects

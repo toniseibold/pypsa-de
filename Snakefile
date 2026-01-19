@@ -570,6 +570,7 @@ rule modify_prenetwork:
         ),
         ammonia=config_provider("sector", "ammonia"),
         industry_relocation=config_provider("sector", "industry_relocation"),
+        pcipmi_projects=config_provider("pcipmi_projects"),
     input:
         costs_modifications="ariadne-data/costs_{planning_horizons}-modifications.csv",
         network=resources(
@@ -603,7 +604,12 @@ rule modify_prenetwork:
         industry_sector_ratios=resources(
             "industry_sector_ratios_{planning_horizons}.csv"
         ),
-        new_industrial_energy_demand="ariadne-data/UBA_Projektionsbericht2025_Abbildung31_MWMS.csv",   
+        new_industrial_energy_demand="ariadne-data/UBA_Projektionsbericht2025_Abbildung31_MWMS.csv",
+        pcipmi_projects=lambda w: (
+            resources("pcipmi_projects/links_h2_pipeline_s_{clusters}_{opts}.csv")
+            if config_provider("pcipmi_projects", "enable")(w)
+            else []
+        ),
     output:
         network=resources(
             "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final.nc"
@@ -701,6 +707,7 @@ rule modify_industry_demand:
 rule build_wasserstoff_kernnetz:
     params:
         kernnetz=config_provider("wasserstoff_kernnetz"),
+        pcipmi_projects=config_provider("pcipmi_projects", "enable"),
     input:
         wasserstoff_kernnetz_1=storage(
             "https://fnb-gas.de/wp-content/uploads/2024/07/2024_07_22_Anlage2_Leitungsmeldungen_weiterer_potenzieller_Wasserstoffnetzbetreiber.xlsx",

@@ -1677,6 +1677,28 @@ if __name__ == "__main__":
     if snakemake.params.enable_kernnetz:
         fn = snakemake.input.wkn
         wkn = pd.read_csv(fn, index_col=0)
+        if snakemake.params.pcipmi_projects["enable"]:
+            logger.info("Filtering out pcipmi projects that are already included.")
+            pci = pd.read_csv(snakemake.input.pcipmi_projects, index_col=0)
+            pci.bus0 = pci.bus0.str.replace(" H2", "")
+            pci.bus1 = pci.bus1.str.replace(" H2", "")
+            pairs1 = pd.DataFrame(
+                np.sort(wkn[["bus0", "bus1"]], axis=1),
+                index=wkn.index
+            )
+
+            pairs2 = pd.DataFrame(
+                np.sort(pci[["bus0", "bus1"]], axis=1),
+                index=pci.index
+            )
+
+            mask = pairs1.apply(tuple, axis=1).isin(
+                pairs2.apply(tuple, axis=1)
+            )
+            logger.info(f"Removing {mask.sum()} entries from the Wasserstoffkernnetz.")
+            wkn = wkn[~mask]
+            logger.info(f"Taking {len(wkn)} links into account.")
+
         add_wasserstoff_kernnetz(n, wkn, costs)
 
     # change to NEP21 costs

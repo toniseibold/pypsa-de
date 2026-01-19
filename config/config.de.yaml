@@ -4,7 +4,7 @@
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#run
 run:
-  prefix: xxxclusters
+  prefix: xxxclusters # 01_19_pcipmi_projects
   name:
   # - no_co2_network
   # - frozen_H2_27
@@ -238,6 +238,13 @@ wasserstoff_kernnetz:
   cutoff_year: 2028
   force_all_ipcei_pci: true
 
+pcipmi_projects:
+  enable: true
+  H2:
+    pipelines: True
+    storage: True
+    cutoff_year: 2028
+
 new_decentral_fossil_boiler_ban:
   DE: 2029
 
@@ -467,14 +474,14 @@ solving:
         gas pipeline new: 1500
         H2 pipeline: 4700
         H2 pipeline retrofitted: 4700
-        CO2 pipeline: 434 # 434 t/h 40cm pipeline // 1712 t/h 80cm pipeline 15 Mt/a // 1328 t/h 70cm pipelines 11.63 Mt/a
+        CO2 pipeline: 1328 # 434 t/h 40cm pipeline // 1712 t/h 80cm pipeline 15 Mt/a // 1328 t/h 70cm pipelines 11.63 Mt/a
       link_threshold:
         DC: 0.3
         gas pipeline: 0.3
         gas pipeline new: 0.3
         H2 pipeline: 0.05
         H2 pipeline retrofitted: 0.05
-        CO2 pipeline: 0.2
+        CO2 pipeline: 0.1
       fractional_last_unit_size: true
   constraints:
     # The default CO2 budget uses the KSG targets, and the non CO2 emissions from the REMIND model in the KN2045_Mix scenario
@@ -670,7 +677,7 @@ solving:
   #     BarHomogeneous: 1
 
   sweep:
-    enable: True
+    enable: false
     diameter:
       - 40
       - 70
@@ -693,7 +700,9 @@ solve_operations:
     - high_gas_price
     - low_seq_cost
     - high_seq_cost
-    # not applicable for operations optimization yet
+    # - low_electrolysis
+    # - high_industry_demand
+    # # not applicable for operations optimization yet
     # - no_early_retirement
     # - european_relocation
     # - non_european_relocation

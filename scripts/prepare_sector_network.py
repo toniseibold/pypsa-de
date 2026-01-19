@@ -7173,6 +7173,100 @@ def add_import_options(
                 marginal_cost=import_options["hbi"][investment_year],
             )
 
+def add_pcipmi_projects(
+        n: pypsa.Network,
+        fn_pipes: str,
+        fn_storage: str,
+        pcipmi_projects: dict,
+        costs: pd.DataFrame,
+):
+    """
+    Add H2 pcipmi projects
+
+    Parameters
+    ----------
+    n : pypsa.Network
+    fn_pipes: str,
+    fn_storage: str,
+    pcipmi_projects: dict,
+    costs: pd.DataFrame
+    """
+    
+    capital_cost_carrier = costs.at["H2 (g) pipeline", "capital_cost"]
+    lifetime_carrier = costs.at["H2 (g) pipeline", "lifetime"]
+    carrier = "H2 pipeline"
+    projects = pd.read_csv(fn_pipes, index_col=0, dtype={"bus0": str, "bus1": str})
+    if pcipmi_projects["H2"]["cutoff_year"]:
+        logger.info(f"Only including pcipmi projects up until {pcipmi_projects["H2"]["cutoff_year"]}")
+        projects = projects[projects.build_year <= pcipmi_projects["H2"]["cutoff_year"]]
+    else:
+        logger.info(f"Activating PCI/PMI {carrier}s commissioned by {investment_year}.")
+
+    # Drop existing links that have the same bus0 and bus1 as the PCI/PMI projects
+    existing_links = n.links.query("carrier == @carrier").copy()
+    existing_links["bus_set"] = existing_links.apply(
+        lambda row: frozenset([row.bus0, row.bus1]), axis=1
+    )
+    pcipmi_links_set = projects.apply(
+        lambda row: frozenset([row.bus0, row.bus1]), axis=1
+    )
+    duplicates = existing_links.loc[existing_links.bus_set.isin(pcipmi_links_set)].index
+
+    logger.info(
+        f"- replacing {len(duplicates)} existing {carrier}s with PCI/PMI projects of the same bus0 and bus1"
+    )
+    n.links = n.links.drop(duplicates)
+
+    n.add(
+        "Link",
+        projects.index,
+        p_min_pu=-1,  # allow all PCI/PMI projects to be used in both directions
+        capital_cost=capital_cost_carrier * projects.length.values,
+        lifetime=lifetime_carrier,
+        p_nom_extendable=False,
+        **projects,
+    )
+
+    # Deactivate links newer than investment_year
+    b_future_link = n.links["build_year"] > investment_year
+    n.links.loc[b_future_link, "active"] = False
+
+    # taking care of H2 stores
+    stores = pd.read_csv(fn_storage, index_col=0)
+    carrier = stores.carrier.unique()[0]
+
+    if pcipmi_projects["H2"]["cutoff_year"]:
+        logger.info(f"Only including pcipmi projects up until {pcipmi_projects["H2"]["cutoff_year"]}")
+        stores = stores[stores.build_year <= pcipmi_projects["H2"]["cutoff_year"]]
+    else:
+        logger.info(f"Adding PCI/PMI stores: Carrier {carrier}.")
+
+    capital_cost_carrier = costs.at["hydrogen storage underground", "capital_cost"]
+    lifetime_carrier = costs.at["hydrogen storage underground", "lifetime"]
+    e_cyclic = True
+    marginal_cost = 0
+    
+    logger.info(f"Adding PCI/PMI stores: Carrier {carrier}.")
+    n.add(
+        "Store",
+        stores.index,
+        bus=stores.bus.values,
+        build_year=stores.build_year.values,
+        e_nom_extendable=False,
+        e_nom=stores.e_nom.values,
+        e_cyclic=e_cyclic,
+        carrier=stores.carrier.values,
+        capital_cost=capital_cost_carrier,
+        marginal_cost=marginal_cost,
+        lifetime=lifetime_carrier,
+    )
+
+    logger.info(f"Added {len(stores)} {carrier} stores.")
+
+    # Deactivate stores newer than investment_year
+    b_future_store = n.stores["build_year"] > investment_year
+    n.stores.loc[b_future_store, "active"] = False
+
 
 if __name__ == "__main__":
     if "snakemake" not in globals():
@@ -7283,6 +7377,15 @@ if __name__ == "__main__":
         spatial=spatial,
         options=options,
     )
+    pcipmi_projects = snakemake.params.pcipmi_projects
+    if pcipmi_projects["enable"] and (investment_year > 2025):
+        add_pcipmi_projects(
+            n=n,
+            fn_pipes=snakemake.input.pcipmi_links_h2_pipeline,
+            fn_storage=snakemake.input.pcipmi_links_h2_storage,
+            pcipmi_projects=pcipmi_projects,
+            costs=costs,
+            )
 
     if options["transport"]:
         add_land_transport(
