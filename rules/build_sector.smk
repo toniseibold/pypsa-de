@@ -1282,6 +1282,19 @@ def input_heat_source_power(w):
         ).keys()
     }
 
+def input_pcipmi_projects(w):
+    pcipmi_projects = config_provider("pcipmi_projects")(w)
+    # if pcipmi_projects["enable"]:
+    components = pcipmi_projects["include"] + ["buses_pcipmi_offshore"]
+    inputs = {
+        project_type: resources(
+            f"pcipmi_projects/{project_type}"
+            + "_s_{clusters}_{opts}.csv"
+        )
+        for project_type in components if project_type != "storage_units_electricity"
+    }
+    return inputs
+
 
 rule prepare_sector_network:
     params:
@@ -1316,10 +1329,12 @@ rule prepare_sector_network:
         temperature_limited_stores=config_provider(
             "sector", "district_heating", "temperature_limited_stores"
         ),
+        carrier_networks=config_provider("carrier_networks"),
         pcipmi_projects=config_provider("pcipmi_projects"),
     input:
         unpack(input_profile_offwind),
         unpack(input_heat_source_power),
+        unpack(input_pcipmi_projects),
         **rules.cluster_gas_network.output,
         **rules.build_gas_input_locations.output,
         snapshot_weightings=resources(
@@ -1443,17 +1458,19 @@ rule prepare_sector_network:
         industry_sector_ratios=resources(
             "industry_sector_ratios_{planning_horizons}.csv"
         ),
-        pcipmi_links_h2_pipeline=lambda w: (
-            resources("pcipmi_projects/links_h2_pipeline_s_{clusters}_{opts}.csv")
+        pcipmi_links_co2_pipeline=lambda w: (
+            resources("pcipmi_projects/links_co2_pipeline_s_{clusters}_{opts}.csv")
             if (
-                config_provider("pcipmi_projects", "enable")(w)
+                config_provider("carrier_networks", "CO2", "enable")(w) and
+                config_provider("carrier_networks", "CO2", "include", "pcipmi")(w)
                 )
             else []
         ),
-        pcipmi_links_h2_storage=lambda w: (
-            resources("pcipmi_projects/stores_h2_s_{clusters}_{opts}.csv")
+        pcipmi_links_h2_pipeline=lambda w: (
+            resources("pcipmi_projects/links_h2_pipeline_s_{clusters}_{opts}.csv")
             if (
-                config_provider("pcipmi_projects", "enable")(w)
+                config_provider("carrier_networks", "H2", "enable")(w) and
+                config_provider("carrier_networks", "H2", "include", "pcipmi")(w)
                 )
             else []
         ),

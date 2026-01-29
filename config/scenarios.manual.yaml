@@ -1,16 +1,26 @@
 no_co2_network:
   sector:
     co2_network: true # deactivated in solve_network
+  carrier_networks:
+    CO2:
+      enable: false
 
-frozen_H2_27:
+frozen_H2_28:
 # only h2 network with projects until 2027 are added
 # no more expansion of the h2 grid allowed
   wasserstoff_kernnetz:
     enable: true
-    cutoff_year: 2027
+    cutoff_year: 2028
     force_all_ipcei_pci: false
   sector:
     H2_network: false
+  carrier_networks:
+    CO2:
+      enable: true
+    H2:
+      enable: true
+      options:
+        delay: 6 # build_year + delay < planning_horizon
 
 endo_H2:
 # endogenous optimization of h2 network
@@ -18,12 +28,24 @@ endo_H2:
   wasserstoff_kernnetz:
     enable: false
     force_all_ipcei_pci: false
-  pcipmi_projects:
-    enable: false
+  carrier_networks:
+    CO2:
+      enable: false
+    H2:
+      enable: false
 
 pcipmi_H2_+:
 # forcing all pcipmi projects
 # endogenous extension of H2 allowed
+  carrier_networks:
+    CO2:
+      enable: true
+      options:
+        delay: 0 # build_year + delay < planning_horizon
+    H2:
+      enable: true
+      options:
+        delay: 0 # build_year + delay < planning_horizon
 
 onshore_sequestration:
 # onshore sequestration of co2 allowed
@@ -37,71 +59,36 @@ onshore_sequestration:
       - optimistic estimate aquifer Mt
       include_onshore: true
 
-low_seq_potential:
-# lower volume for sequestration available
-  sector:
-    co2_sequestration_potential:
-      2030: 20
-      2035: 50
-      2040: 90
-      2045: 125
-      2050: 125
-
-high_seq_potential:
-# higher volume for sequestration available
-  sector:
-    co2_sequestration_potential:
-      2030: 80
-      2035: 200
-      2040: 360
-      2045: 500
-      2050: 500
-
-low_gas_price:
-# gas price of 50 % of standard price
-  costs:
-    gas_price_factor: 0.5
-
-high_gas_price:
-# gas price of 200 % of standard price
-  costs:
-    gas_price_factor: 2.0
-
-low_seq_cost:
-# sequestration cost of 50 % of standard cost
-  sector:
-    co2_sequestration_cost: 17.5
-
-high_seq_cost:
-# sequestration cost of 200 % of standard cost
-  sector:
-    co2_sequestration_cost: 70
-
-european_relocation:
-# import of meoh, NH3, hbi from Europe
-  sector:
-    industry_relocation: true
-
-non_european_relocation:
-# import of meoh, NH3, hbi from Europe
-# and non-European countries
-  sector:
-    industry_relocation: true
-    imports:
-      enable: true
-      limit: .inf
-      limit_sense: <=
-      price:
-        NH3:
-          2035: 113
-          2045: 98
-        methanol:
-          2035: 138
-          2045: 120
-        hbi:
-          2035: 462
-          2045: 438
-
 no_early_retirement:
   sector:
     bof_retirement_date: false
+
+seq_90:
+  sector:
+    co2_sequestration_potential:
+      2035: 90
+
+seq_80:
+  sector:
+    co2_sequestration_potential:
+      2035: 80
+
+seq_70:
+  sector:
+    co2_sequestration_potential:
+      2035: 70
+
+seq_60:
+  sector:
+    co2_sequestration_potential:
+      2035: 60
+
+seq_50:
+  sector:
+    co2_sequestration_potential:
+      2035: 50
+
+northern_lights:
+# remove sequestration potential in North Sea for Germany
+# Add shipping route Germany - Northern Lights
+# Done in modify_prenetwork

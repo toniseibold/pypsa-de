@@ -1409,7 +1409,7 @@ if __name__ == "__main__":
             sector_opts="none",
             planning_horizons="2035",
             # column="pcipmi_",
-            run="no_co2_network",
+            run="northern_lights",
         )
     configure_logging(snakemake)
     set_scenario_config(snakemake)
@@ -1436,6 +1436,7 @@ if __name__ == "__main__":
 
     if snakemake.params.solving["sweep"]["enable"] and snakemake.wildcards.planning_horizons=="2035":
         # deactivate post discretization
+        logger.info("Disabling post_discretizaion")
         snakemake.params.solving["options"]["skip_iterations"] = True
         snakemake.params.solving["options"]["post_discretization"]["enable"] = False
 

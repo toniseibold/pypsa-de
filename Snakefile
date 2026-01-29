@@ -570,7 +570,7 @@ rule modify_prenetwork:
         ),
         ammonia=config_provider("sector", "ammonia"),
         industry_relocation=config_provider("sector", "industry_relocation"),
-        pcipmi_projects=config_provider("pcipmi_projects"),
+        carrier_networks=config_provider("carrier_networks"),
     input:
         costs_modifications="ariadne-data/costs_{planning_horizons}-modifications.csv",
         network=resources(

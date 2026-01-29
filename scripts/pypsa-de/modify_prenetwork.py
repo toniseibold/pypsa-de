@@ -1627,6 +1627,30 @@ def consolidate_shipping_demand(n):
         p_nom=3e3,
         )
 
+def northern_lights(n):
+    logger.info("Removing sequestration potential in North Sea for Germany.")
+    # get stores buses and links
+    idx = n.stores[(n.stores.bus.str.startswith("DE")) & (n.stores.carrier=="co2 sequestered")].index
+    idx_stored = idx.str.replace("sequestered", "stored")
+
+    n.stores.drop(idx, inplace=True)
+    n.links.drop(n.links[n.links.bus1.isin(idx)].index, inplace=True)
+    n.buses.drop(idx, inplace=True)
+
+    buses = idx.str.replace(" offshore 0 co2 sequestered", "")
+    names = idx.str.replace(" offshore 0 co2 sequestered", "NorthernLights Ship")
+    logger.info("Adding possibility to ship co2 to Northern Lights.")
+    n.add("Link",
+          names,
+          bus0=idx_stored,
+          bus1=["NO1 0 offshore 1 co2 stored"],
+          marginal_cost=50, # €/t
+          capital_cost=0.1,
+          carrier="co2 sequestered",
+          efficiency=1.0,
+          p_nom_extendable=True,
+          )
+
 
 
 if __name__ == "__main__":
@@ -1677,7 +1701,7 @@ if __name__ == "__main__":
     if snakemake.params.enable_kernnetz:
         fn = snakemake.input.wkn
         wkn = pd.read_csv(fn, index_col=0)
-        if snakemake.params.pcipmi_projects["enable"]:
+        if snakemake.params.carrier_networks["H2"]["enable"]:
             logger.info("Filtering out pcipmi projects that are already included.")
             pci = pd.read_csv(snakemake.input.pcipmi_projects, index_col=0)
             pci.bus0 = pci.bus0.str.replace(" H2", "")
@@ -1748,6 +1772,9 @@ if __name__ == "__main__":
         unravel_industry(n)
     else:
         consolidate_shipping_demand(n)
+
+    if current_year == 2035 and snakemake.wildcards.run=="northern_lights":
+        northern_lights(n)
 
     sanitize_custom_columns(n)
 

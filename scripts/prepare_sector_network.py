@@ -45,8 +45,9 @@ from scripts.build_transport_demand import transport_degree_factor
 from scripts.definitions.heat_sector import HeatSector
 from scripts.definitions.heat_system import HeatSystem
 from scripts.prepare_network import maybe_adjust_costs_and_potentials
-
+from scripts.base_network import _remove_dangling_branches
 spatial = SimpleNamespace()
+spatial_pcipmi = SimpleNamespace()
 logger = logging.getLogger(__name__)
 
 
@@ -265,6 +266,47 @@ def define_spatial(nodes, options):
 
 
 spatial = SimpleNamespace()
+
+
+# PCI-PMI projects
+def define_spatial_pcipmi(
+    nodes: pd.Index,
+    options: dict
+) -> SimpleNamespace:
+    """
+    Namespace for PCI-PMI spatial.
+
+    Parameters
+    ----------
+    nodes : list-like
+    """
+    global spatial_pcipmi
+
+    spatial_pcipmi.nodes = nodes
+
+    # co2
+
+    spatial_pcipmi.co2 = SimpleNamespace()
+
+    if options["co2_spatial"]:
+        spatial_pcipmi.co2.nodes = nodes + " co2 stored"
+        spatial_pcipmi.co2.locations = nodes
+        spatial_pcipmi.co2.vents = nodes + " co2 vent"
+        spatial_pcipmi.co2.process_emissions = nodes + " process emissions"
+    else:
+        spatial_pcipmi.co2.nodes = ["co2 stored"]
+        spatial_pcipmi.co2.locations = ["EU"]
+        spatial_pcipmi.co2.vents = ["co2 vent"]
+        spatial_pcipmi.co2.process_emissions = ["process emissions"]
+
+    spatial_pcipmi.co2.df = pd.DataFrame(vars(spatial_pcipmi.co2), index=nodes)
+
+    # hydrogen
+    spatial_pcipmi.h2 = SimpleNamespace()
+    spatial_pcipmi.h2.nodes = nodes + " H2"
+    spatial_pcipmi.h2.locations = nodes
+
+    return spatial_pcipmi
 
 
 def determine_emission_sectors(options):
@@ -7173,34 +7215,57 @@ def add_import_options(
                 marginal_cost=import_options["hbi"][investment_year],
             )
 
-def add_pcipmi_projects(
-        n: pypsa.Network,
-        fn_pipes: str,
-        fn_storage: str,
-        pcipmi_projects: dict,
-        costs: pd.DataFrame,
-):
-    """
-    Add H2 pcipmi projects
 
-    Parameters
-    ----------
-    n : pypsa.Network
-    fn_pipes: str,
-    fn_storage: str,
-    pcipmi_projects: dict,
-    costs: pd.DataFrame
+def add_pcipmi_buses_offshore(
+    n: pypsa.Network,
+    buses_pcipmi_offshore: str
+) -> SimpleNamespace:
     """
+    Add offshore buses and namespace for PCI-PMI offshore buses
+    """
+    logger.info("Adding offshore buses for PCI-PMI offshore projects.")
+    buses_pcipmi_offshore = pd.read_csv(buses_pcipmi_offshore, index_col=0)
+    n.add("Bus", 
+          buses_pcipmi_offshore.index, 
+          location=buses_pcipmi_offshore.index,
+          country=buses_pcipmi_offshore.index,
+          **buses_pcipmi_offshore.drop(columns="geometry"), 
+    )
+
+    # Create spatial
+    spatial_pcipmi = define_spatial_pcipmi(buses_pcipmi_offshore.index, options)
+
+    return spatial_pcipmi
+
+
+
+def add_pcipmi_links(
+    n: pypsa.Network,
+    links_path: str,
+    investment_year: int,
+    costs: pd.DataFrame,
+    carrier: str,
+    carrier_networks: dict,
+) -> None:
+    """
+    Add PCI-PMI links to the network.
+    """
+    if carrier == "H2 pipeline":
+        capital_cost_carrier = costs.at["H2 (g) pipeline", "capital_cost"]
+        lifetime_carrier = costs.at["H2 (g) pipeline", "lifetime"]
+        delay = carrier_networks["H2"]["options"]["delay"]
+
+    if carrier == "CO2 pipeline":
+        capital_cost_carrier = costs.at["CO2 pipeline", "capital_cost"]
+        lifetime_carrier = costs.at["CO2 pipeline", "lifetime"]
+        delay = carrier_networks["CO2"]["options"]["delay"]
+
+    projects = pd.read_csv(links_path, index_col=0, dtype={"bus0": str, "bus1": str})
+    logger.info(f"Activating PCI/PMI {carrier}s commissioned by {investment_year}.")
     
-    capital_cost_carrier = costs.at["H2 (g) pipeline", "capital_cost"]
-    lifetime_carrier = costs.at["H2 (g) pipeline", "lifetime"]
-    carrier = "H2 pipeline"
-    projects = pd.read_csv(fn_pipes, index_col=0, dtype={"bus0": str, "bus1": str})
-    if pcipmi_projects["H2"]["cutoff_year"]:
-        logger.info(f"Only including pcipmi projects up until {pcipmi_projects["H2"]["cutoff_year"]}")
-        projects = projects[projects.build_year <= pcipmi_projects["H2"]["cutoff_year"]]
-    else:
-        logger.info(f"Activating PCI/PMI {carrier}s commissioned by {investment_year}.")
+    # Add delay
+    projects["build_year"] = projects["build_year"] + delay
+    logger.info(f"Adding a delay of {delay} years to the build year.")
 
     # Drop existing links that have the same bus0 and bus1 as the PCI/PMI projects
     existing_links = n.links.query("carrier == @carrier").copy()
@@ -7216,7 +7281,7 @@ def add_pcipmi_projects(
         f"- replacing {len(duplicates)} existing {carrier}s with PCI/PMI projects of the same bus0 and bus1"
     )
     n.links = n.links.drop(duplicates)
-
+    projects.loc[:, "carrier"] += " pcipmi"
     n.add(
         "Link",
         projects.index,
@@ -7231,20 +7296,151 @@ def add_pcipmi_projects(
     b_future_link = n.links["build_year"] > investment_year
     n.links.loc[b_future_link, "active"] = False
 
-    # taking care of H2 stores
-    stores = pd.read_csv(fn_storage, index_col=0)
+
+def add_pcipmi_h2_buses(
+    n: pypsa.Network,
+    costs: pd.DataFrame,
+    nodes: pd.Index,
+) -> None:
+    """
+    Add H2 nodes and electrolysers to PCI-PMI offshore buses.
+    """
+    logger.info("Adding H2 nodes and electrolysers to PCI-PMI offshore buses.")
+    if "H2" not in n.carriers.index:
+        n.add("Carrier", "H2")
+    
+    n.add(
+        "Bus", 
+        nodes + " H2", 
+        location=nodes + " H2", 
+        carrier="H2", 
+        unit="MWh_LHV", 
+        x=n.buses.loc[nodes, "x"].rename(lambda x: x + " H2"),
+        y=n.buses.loc[nodes, "y"].rename(lambda x: x + " H2"),
+        )
+
+    # n.add(
+    #     "Link",
+    #     nodes + " H2 Electrolysis",
+    #     bus1=nodes + " H2",
+    #     bus0=nodes,
+    #     p_nom_extendable=True,
+    #     carrier="H2 Electrolysis",
+    #     efficiency=costs.at["electrolysis", "efficiency"],
+    #     capital_cost=costs.at["electrolysis", "capital_cost"],
+    #     lifetime=costs.at["electrolysis", "lifetime"],
+    #     location = nodes,
+    # )
+
+
+def add_pcipmi_co2_buses(
+    n: pypsa.Network,
+    nodes: pd.Index,
+) -> None:
+    """
+    Add CO2 stored and sequestered to PCI-PMI offshore buses.
+    """
+    logger.info("Adding CO2 stored and sequestered to PCI-PMI offshore buses.")
+    if "CO2" not in n.carriers.index:
+        n.add("Carrier", "CO2")
+    
+    n.add(
+        "Bus",
+        nodes + " co2 sequestered",
+        location=nodes + " co2 sequestered",
+        carrier="co2 sequestered",
+        unit="t_co2",
+        x=n.buses.loc[nodes, "x"].rename(lambda x: x + " co2 sequestered"),
+        y=n.buses.loc[nodes, "y"].rename(lambda x: x + " co2 sequestered"),
+    )
+    
+    if "co2 sequestered" not in n.carriers.index:
+        n.add("Carrier", "co2 sequestered")
+
+    n.add(
+        "Bus", 
+        nodes + " co2 stored", 
+        location=nodes + " co2 stored", 
+        carrier="co2 stored", 
+        unit="t_co2", 
+        x=n.buses.loc[nodes, "x"].rename(lambda x: x + " co2 stored"),
+        y=n.buses.loc[nodes, "y"].rename(lambda x: x + " co2 stored"),
+        )
+
+    if "co2 stored" not in n.carriers.index:
+        n.add("Carrier", "co2 stored")
+
+    # Add connecting links
+    n.add(
+        "Link",
+        nodes + " co2 sequestered",
+        bus0=nodes + " co2 stored",
+        bus1=nodes + " co2 sequestered",
+        marginal_cost=options["co2_sequestration_cost"],
+        capital_cost=0.1, # TODO: needed?
+        carrier="co2 sequestered",
+        efficiency=1.0,
+        p_nom_extendable=True,
+    )    
+
+def add_pcipmi_stores(
+    n: pypsa.Network,
+    stores_path: str,
+    investment_year: int,
+    costs: pd.DataFrame,
+    pcipmi_projects: dict,
+    options: dict,
+) -> None:
+    stores = pd.read_csv(stores_path, index_col=0)
+    # drop projects not within the scope of our model (Greece and Croatia)
+    stores = stores[~stores.bus.isna()]
     carrier = stores.carrier.unique()[0]
 
-    if pcipmi_projects["H2"]["cutoff_year"]:
-        logger.info(f"Only including pcipmi projects up until {pcipmi_projects["H2"]["cutoff_year"]}")
-        stores = stores[stores.build_year <= pcipmi_projects["H2"]["cutoff_year"]]
-    else:
-        logger.info(f"Adding PCI/PMI stores: Carrier {carrier}.")
+    # Adding stores
+    logger.info(f"Adding PCI/PMI stores: Carrier {carrier}.")
 
-    capital_cost_carrier = costs.at["hydrogen storage underground", "capital_cost"]
-    lifetime_carrier = costs.at["hydrogen storage underground", "lifetime"]
-    e_cyclic = True
-    marginal_cost = 0
+    delay = pcipmi_projects["options"]["delay"]
+    # Add delay
+    stores["build_year"] = stores["build_year"] + delay
+    logger.info(f"Adding a delay of {delay} years to the build year.")
+
+    if carrier == "H2 Store":
+        capital_cost_carrier = costs.at["hydrogen storage underground", "capital_cost"]
+        lifetime_carrier = costs.at["hydrogen storage underground", "lifetime"]
+        e_cyclic = True
+        marginal_cost = 0
+
+    if carrier == "co2 sequestered":
+        capital_cost_carrier = 0
+        lifetime_carrier = options["co2_sequestration_lifetime"]
+        e_cyclic = False
+        marginal_cost = -0.1
+
+        co2_buses = pd.Series(stores.bus.unique())
+        # check which buses are not in n.buses
+        missing_co2_buses = pd.DataFrame(co2_buses[~co2_buses.isin(n.buses.index)])
+        missing_co2_buses.index = missing_co2_buses[0].str.replace(" co2 sequestered", "")
+    
+        n.add(
+            "Bus",
+            missing_co2_buses[0],
+            carrier="co2 sequestered",
+            unit="t_co2",
+            x=n.buses.loc[missing_co2_buses.index, "x"].rename(lambda x: x + " co2 sequestered"),
+            y=n.buses.loc[missing_co2_buses.index, "y"].rename(lambda x: x + " co2 sequestered"),
+        )
+
+        n.add(
+            "Link",
+            missing_co2_buses[0],
+            bus0=missing_co2_buses.index + " co2 stored",
+            bus1=missing_co2_buses[0].values,
+            marginal_cost=options["co2_sequestration_cost"],
+            capital_cost=0.1, # TODO: needed?
+            carrier="co2 sequestered",
+            efficiency=1.0,
+            p_nom_extendable=True,
+        )    
     
     logger.info(f"Adding PCI/PMI stores: Carrier {carrier}.")
     n.add(
@@ -7268,6 +7464,60 @@ def add_pcipmi_projects(
     n.stores.loc[b_future_store, "active"] = False
 
 
+def update_link_extendability(
+    n: pypsa.Network,
+    carrier_networks: dict,
+) -> None:
+    n.buses.country = n.buses.index.str[:2]
+    links = n.links.copy()
+    links["country0"] = links.bus0.map(n.buses.country)
+    links["country1"] = links.bus1.map(n.buses.country)
+
+    b_is_pcipmi = links.index.str.startswith("PCI")
+    b_is_national = links.country0 == links.country1
+    b_is_h2_pipeline = links.carrier == "H2 pipeline"
+    b_is_co2_pipeline = links.carrier == "CO2 pipeline"
+    b_is_offshore = n.links.index.str.contains("offshore")
+
+    if carrier_networks["CO2"]["enable"] and carrier_networks["CO2"]["extendable"]: 
+        extendable = carrier_networks["CO2"]["extendable"]
+
+        # Default to false, offshore always to true
+        n.links.loc[b_is_co2_pipeline, "p_nom_extendable"] = False
+        n.links.loc[b_is_co2_pipeline & b_is_offshore, "p_nom_extendable"] = True
+
+        if "national" in extendable["greenfield"]:
+            n.links.loc[b_is_co2_pipeline & ~b_is_pcipmi & b_is_national, "p_nom_extendable"] = True
+        if "international" in extendable["greenfield"]:
+            n.links.loc[b_is_co2_pipeline & ~b_is_pcipmi & ~b_is_national, "p_nom_extendable"] = True
+        if "national" in extendable["pcipmi"]:
+            n.links.loc[b_is_co2_pipeline & b_is_pcipmi & b_is_national, "p_nom_extendable"] = True
+            n.links.loc[b_is_co2_pipeline & b_is_pcipmi & b_is_national, "build_year"] = 0 
+        if "international" in extendable["pcipmi"]:
+            n.links.loc[b_is_co2_pipeline & b_is_pcipmi & ~b_is_national, "p_nom_extendable"] = True
+            n.links.loc[b_is_co2_pipeline & b_is_pcipmi & ~b_is_national, "build_year"] = 0 
+    
+    if carrier_networks["H2"]["enable"] and carrier_networks["H2"]["extendable"]:
+        extendable = carrier_networks["H2"]["extendable"]
+
+        # Default to false, offshore always to true
+        n.links.loc[b_is_h2_pipeline, "p_nom_extendable"] = False
+        n.links.loc[b_is_h2_pipeline & b_is_offshore, "p_nom_extendable"] = True
+
+        if "national" in extendable["greenfield"]:
+            n.links.loc[b_is_h2_pipeline & ~b_is_pcipmi & b_is_national, "p_nom_extendable"] = True
+        if "international" in extendable["greenfield"]:
+            n.links.loc[b_is_h2_pipeline & ~b_is_pcipmi & ~b_is_national, "p_nom_extendable"] = True
+        if "national" in extendable["pcipmi"]:
+            n.links.loc[b_is_h2_pipeline & b_is_pcipmi & b_is_national, "p_nom_extendable"] = True
+            n.links.loc[b_is_h2_pipeline & b_is_pcipmi & b_is_national, "build_year"] = 0
+        if "international" in extendable["pcipmi"]:
+            n.links.loc[b_is_h2_pipeline & b_is_pcipmi & ~b_is_national, "p_nom_extendable"] = True  
+            n.links.loc[b_is_h2_pipeline & b_is_pcipmi & ~b_is_national, "build_year"] = 0  
+            # TODO master: make PyPSA-Eur more robust wrt. to build_year zero for myopic.
+
+
+
 if __name__ == "__main__":
     if "snakemake" not in globals():
         from scripts._helpers import mock_snakemake
@@ -7279,7 +7529,7 @@ if __name__ == "__main__":
             ll="vopt",
             sector_opts="none",
             planning_horizons="2035",
-            run="no_co2_network",
+            run="northern_lights",
         )
 
     configure_logging(snakemake)  # pylint: disable=E0606
@@ -7377,15 +7627,62 @@ if __name__ == "__main__":
         spatial=spatial,
         options=options,
     )
+
+    carrier_networks = snakemake.params.carrier_networks
     pcipmi_projects = snakemake.params.pcipmi_projects
-    if pcipmi_projects["enable"] and (investment_year > 2025):
-        add_pcipmi_projects(
-            n=n,
-            fn_pipes=snakemake.input.pcipmi_links_h2_pipeline,
-            fn_storage=snakemake.input.pcipmi_links_h2_storage,
-            pcipmi_projects=pcipmi_projects,
-            costs=costs,
-            )
+
+    if carrier_networks["H2"]["enable"] and investment_year > 2025:
+        spatial_pcipmi = add_pcipmi_buses_offshore(n, snakemake.input.buses_pcipmi_offshore)
+
+        # adding electrolysis units at the offshore buses
+        add_pcipmi_h2_buses(
+            n,
+            costs,
+            spatial_pcipmi.nodes,
+        )
+        add_pcipmi_links(
+            n,
+            snakemake.input.pcipmi_links_h2_pipeline,
+            investment_year,
+            costs,
+            "H2 pipeline",
+            carrier_networks,
+        )
+
+        add_pcipmi_stores(
+            n, 
+            snakemake.input.stores_h2,
+            investment_year,
+            costs,
+            pcipmi_projects,
+            options,
+        )
+    if carrier_networks["CO2"]["enable"] and investment_year > 2025:
+        add_pcipmi_co2_buses(
+            n,
+            spatial_pcipmi.nodes,
+        )
+        add_pcipmi_links(
+            n,
+            snakemake.input.pcipmi_links_co2_pipeline,
+            investment_year,
+            costs,
+            "CO2 pipeline",
+            carrier_networks,
+        )
+
+        add_pcipmi_stores(
+            n, 
+            snakemake.input.stores_co2,
+            investment_year,
+            costs,
+            pcipmi_projects,
+            options,
+        )
+    if carrier_networks["H2"]["enable"] and investment_year > 2025:
+        # Drop PCI-PMI offshore elec buses
+        # n.buses.drop(spatial_pcipmi.nodes, inplace=True)
+        n.links = _remove_dangling_branches(n.links, n.buses) # PCI-PMI AC offshore buses are not needed
 
     if options["transport"]:
         add_land_transport(

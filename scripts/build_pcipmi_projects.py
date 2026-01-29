@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 import tqdm
-from _helpers import configure_logging, set_scenario_config
+from scripts._helpers import configure_logging, set_scenario_config
 from pypsa.geo import haversine_pts  # to recalculate crow-flies distance
 from shapely import segmentize, unary_union
 from shapely.algorithms.polylabel import polylabel
@@ -557,10 +557,11 @@ if __name__ == "__main__":
 
         snakemake = mock_snakemake(
             "build_pcipmi_projects",
-            clusters="adm",
+            clusters="89",
             opts="",
-            configfiles=["config/third-run.dev.config.yaml"],
-            run="pcipmi"
+            sector="none",
+            configfiles="config/config.de.yaml",
+            run="northern_lights"
         )
 
     configure_logging(snakemake)
@@ -658,7 +659,40 @@ if __name__ == "__main__":
     )
     links_co2_pipeline = _aggregate_links(links_co2_pipeline)
     links_co2_pipeline = _create_unique_ids(links_co2_pipeline)
-
+    # TONITODO: this only works for now:
+    line=LineString([
+            (n.buses.loc["DE0 4"].x, n.buses.loc["DE0 4"].y),
+            (n.buses.loc["NL0 0"].x, n.buses.loc["NL0 0"].y)
+        ])
+    links_co2_pipeline.loc["PCI-13.7-04"] = {
+        "bus0": "DE0 4",
+        "bus1": "NL0 0",
+        "build_year": 2030,
+        "carrier": "CO2 pipeline",
+        "length": (gpd.GeoSeries(line, crs=4326).to_crs(3035).length / 1e3)[0],
+        "p_nom": 3139.0,
+        "tags": [13.7],
+        "underground": "t",
+        "underwater_fraction": 0.0,
+        "geometry":line,
+    }
+    # TONITODO: this only works for now:
+    line=LineString([
+            (n.buses.loc["DE0 4"].x, n.buses.loc["DE0 4"].y),
+            (n.buses.loc["BE0 2"].x, n.buses.loc["BE0 2"].y)
+        ])
+    links_co2_pipeline.loc["PCI-13.8-05"] = {
+        "bus0": "DE0 4",
+        "bus1": "BE0 2",
+        "build_year": 2029,
+        "carrier": "CO2 pipeline",
+        "length": (gpd.GeoSeries(line, crs=4326).to_crs(3035).length / 1e3)[0],
+        "p_nom": 3567.0	,
+        "tags": [13.8],
+        "underground": "t",
+        "underwater_fraction": 0.0,
+        "geometry":line,
+    }
     ### Map stores and storage units
     stores_h2 = gpd.read_file(snakemake.input.stores_h2).set_index("id")
     stores_h2["build_year"] = stores_h2["year"] # Update build_years
