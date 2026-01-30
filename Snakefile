@@ -63,6 +63,7 @@ include: "rules/solve_electricity.smk"
 include: "rules/solve_again.smk"
 include: "rules/solve_sweep.smk"
 include: "rules/postprocess.smk"
+include: "rules/postprocess_paper.smk"
 include: "rules/development.smk"
 
 
