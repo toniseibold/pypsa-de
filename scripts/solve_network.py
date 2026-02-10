@@ -1407,7 +1407,7 @@ if __name__ == "__main__":
             clusters="89",
             configfiles="config/config.de.yaml",
             sector_opts="none",
-            planning_horizons="2035",
+            planning_horizons="2025",
             # column="pcipmi_",
             run="northern_lights",
         )
@@ -1422,10 +1422,15 @@ if __name__ == "__main__":
     n = pypsa.Network(snakemake.input.network)
     planning_horizons = snakemake.wildcards.get("planning_horizons", None)
 
-    # Debug
-    if snakemake.wildcards.run == "no_co2_network":
+    # Deactivate CO2 pipeline endogenous for no_co2_network scenario 2035
+    if snakemake.wildcards.run == "no_co2_network" and planning_horizons == "2035":
         co2_pipes = n.links[(n.links.carrier=="CO2 pipeline") & ~(n.links.index.str.contains("offshore"))].index
         n.links.loc[co2_pipes, "active"] = False
+    # Deactivate H2 pipeline endogenous for frozen_H2_28 scenario 2035
+    if snakemake.wildcards.run == "frozen_H2_28" and planning_horizons == "2035":
+        logger.info("Deactivating endogenous hydrogen pipeline expansion")
+        h2_pipes = n.links[(n.links.carrier.isin(["H2 pipeline retrofitted", "H2 pipeline"])) & (n.links.p_nom_extendable)].index
+        n.links.loc[h2_pipes, "active"] = False
     # co2_pipes = n.links.query("carrier == 'CO2 pipeline'")["build_year"]
     # n.explore(
     #     branch_components=["Link"],

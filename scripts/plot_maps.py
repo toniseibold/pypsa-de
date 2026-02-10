@@ -173,7 +173,7 @@ def plot_co2_map(
         bus_colors=bus_colors,
         link_colors=tech_colors["CO2 pipeline"],
         link_widths=link_widths_total,
-        flow=flow/2e5,
+        flow=flow/1e5,
         branch_components=["Link"],
         line_widths=0,
         ax=ax,
@@ -196,8 +196,8 @@ def plot_co2_map(
         cmap="Purples",
         linewidths=0,
         legend=False,
-        vmax=70,
-        vmin=0,
+        vmax=100,
+        vmin=30,
     )
 
     ax.set_title(title)
@@ -370,7 +370,7 @@ def plot_maps(
     # Set up colorbar
     sm = cm.ScalarMappable(
         cmap="Purples",
-        norm=mcolors.Normalize(vmin=0, vmax=70)
+        norm=mcolors.Normalize(vmin=30, vmax=100)
     )
     sm.set_array([])
 

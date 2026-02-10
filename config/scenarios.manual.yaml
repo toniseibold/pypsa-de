@@ -13,7 +13,7 @@ frozen_H2_28:
     cutoff_year: 2028
     force_all_ipcei_pci: false
   sector:
-    H2_network: false
+    H2_network: true # deactivated in solve_network
   carrier_networks:
     CO2:
       enable: true

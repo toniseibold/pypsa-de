@@ -4,19 +4,19 @@
 
 # docs in https://pypsa-eur.readthedocs.io/en/latest/configuration.html#run
 run:
-  prefix: xxxclusters #01_27_new_scenarios
+  prefix: xxxclusters # 02_09_fix_pipe_flow_cement
   name:
-  # - no_co2_network
-  # - frozen_H2_28
+  - no_co2_network
+  - frozen_H2_28
   - endo_H2
-  # - pcipmi_H2_+
-  # - onshore_sequestration
+  - pcipmi_H2_+
+  - onshore_sequestration
   # - no_early_retirement
   # - seq_90
   # - seq_80
   # - seq_70
   # - seq_60
-  # - seq_50
+  - seq_50
   - northern_lights
   scenarios:
     enable: true
@@ -71,6 +71,7 @@ scenario:
   planning_horizons:
   - 2025
   - 2035
+  - 2045
 
 existing_capacities:
   grouping_years_power: [1920, 1950, 1955, 1960, 1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020]

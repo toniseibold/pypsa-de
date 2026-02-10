@@ -55,6 +55,7 @@ COLUMNS_LINKS = [
     "carrier",
     "underwater_fraction",
     "tags",
+    "p_min_pu",
 ]
 COLUMNS_STORAGE_UNITS = [
     "bus",
@@ -551,6 +552,28 @@ def _aggregate_links(gdf):
     return gdf
 
 
+def specify_flow_direction(links_co2_pipeline):
+    logger.info("Setting flow direction for CO2 pipelines")
+    links_co2_pipeline["p_min_pu"] = 0
+    to_switch = [
+        "PCI-13.1+1-01",
+        "PCI-13.8-02",
+        "PCI-13.7-03",
+        "PCI-13.4-01",
+        ]
+    links_co2_pipeline.loc[to_switch, ["bus0", "bus1"]] = links_co2_pipeline.loc[to_switch, ["bus1", "bus0"]].values
+
+    ambigous = [
+        "PCI-13.7-01",
+        "PCI-13.4-04",
+        "PCI-13.12",
+    ]
+    links_co2_pipeline.loc[ambigous, "p_min_pu"] = -1
+    
+    return links_co2_pipeline
+
+
+
 if __name__ == "__main__":
     if "snakemake" not in globals():
         from scripts._helpers import mock_snakemake
@@ -561,7 +584,7 @@ if __name__ == "__main__":
             opts="",
             sector="none",
             configfiles="config/config.de.yaml",
-            run="northern_lights"
+            run="endo_H2"
         )
 
     configure_logging(snakemake)
@@ -756,9 +779,11 @@ if __name__ == "__main__":
     buses_pcipmi_offshore.to_csv(snakemake.output.buses_pcipmi_offshore, index=True)
 
     logger.info(f" - H2 pipeline components: {len(links_h2_pipeline)}")
+    links_h2_pipeline["p_min_pu"] = -1
     links_h2_pipeline[COLUMNS_LINKS].to_csv(snakemake.output.links_h2_pipeline, index=True)
     
     logger.info(f" - CO2 pipeline components: {len(links_co2_pipeline)}")
+    links_co2_pipeline = specify_flow_direction(links_co2_pipeline)
     links_co2_pipeline[COLUMNS_LINKS].to_csv(snakemake.output.links_co2_pipeline, index=True)
 
     ### Export storages and stores

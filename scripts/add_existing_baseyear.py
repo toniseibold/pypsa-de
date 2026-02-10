@@ -1351,33 +1351,36 @@ def add_existing_cement_plants(n):
     logger.info(f"Adding {len(cement)} existing cement links.")
 
     # clinker production
-    gas_input = costs.at["cement dry clinker", "gas-input"] + costs.at["cement dry clinker", "heat-input"]
+    gas_input = costs.at["cement dry clinker", "gas-input"]
+    heat_input = costs.at["cement dry clinker", "heat-input"]
     electricity_input = costs.at["cement dry clinker", "electricity-input"]
     # process emission from calcination + gas emissions
     # https://www.ipcc-nggip.iges.or.jp/efdb/ef_detail.php
-    co2_emission = 0.5071/gas_input + costs.at["gas", "CO2 intensity"]
+    co2_emission = 0.5071/heat_input + costs.at["gas", "CO2 intensity"]*gas_input/heat_input
 
     n.add(
         "Link",
         cement.index,
-        bus0=[bus + " gas" for bus in cement.bus]
+        bus0=[bus + " cement heat" for bus in cement.bus],
+        bus1=[bus + " clinker" for bus in cement.bus],
+        bus2=[bus + " gas" for bus in cement.bus]
         if snakemake.params.sector["gas_network"]
         else "EU gas",
-        bus1=[bus + " clinker" for bus in cement.bus],
-        bus2=cement.bus,
-        bus3=[bus + " cement emission" for bus in cement.bus],
+        bus3=cement.bus,
+        bus4=[bus + " cement emission" for bus in cement.bus],
         carrier="cement kiln",
         p_nom_extendable=False,
         p_nom=cement['Cement Capacity (millions metric tonnes per annum)']
-        .mul(gas_input)
+        .mul(heat_input)
         .mul(costs.at["cement finishing", "clinker-input"])
         .div(8760)
         .mul(1e6)
         .values,
-        capital_cost=costs.at["cement dry clinker", "capital_cost"] / gas_input,
-        efficiency=1/gas_input,
-        efficiency2=-electricity_input/gas_input,
-        efficiency3=co2_emission,
+        capital_cost=costs.at["cement dry clinker", "capital_cost"] / heat_input,
+        efficiency=1/heat_input,
+        efficiency2=-gas_input/heat_input,
+        efficiency3=-electricity_input/heat_input,
+        efficiency4=co2_emission,
         build_year=cement.grouping_year,
         lifetime=costs.at["cement dry clinker", "lifetime"],
     )

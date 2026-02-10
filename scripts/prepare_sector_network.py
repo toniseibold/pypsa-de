@@ -257,6 +257,7 @@ def define_spatial(nodes, options):
 
     spatial.cement = SimpleNamespace()
     spatial.cement.nodes = nodes + " cement"
+    spatial.cement.heat = nodes + " cement heat"
     spatial.cement.location = nodes
     spatial.clinker = SimpleNamespace()
     spatial.clinker.nodes = nodes + " clinker"
@@ -5886,8 +5887,17 @@ def add_industry(
         n.add("Carrier", "cement")
         n.add("Carrier", "clinker")
         n.add("Carrier", "cement emission")
+        n.add("Carrier", "cement heat")
 
         cement.index = cement.index + " cement"
+
+        n.add(
+            "Bus",
+            spatial.cement.heat,
+            location=spatial.cement.location,
+            carrier="cement heat",
+            unit="MWh",
+        )
 
         n.add(
             "Bus",
@@ -5921,27 +5931,74 @@ def add_industry(
             carrier="cement",
             p_set=p_set,
         )
+        # add heat links
+        n.add("Carrier", "cement heat biomass")
+        n.add("Carrier", "cement heat waste")
+        n.add("Carrier", "cement heat gas")
+
+        n.add(
+            "Link",
+            spatial.cement.heat,
+            suffix = " biomass",
+            bus0=spatial.biomass.nodes,
+            bus1=spatial.cement.heat,
+            bus2=spatial.cement.nodes + " emission",
+            bus3="co2 atmosphere",
+            carrier="cement heat biomass",
+            p_nom=1e6,
+            efficiency=0.9,
+            efficiency2=costs.at["solid biomass", "CO2 intensity"],
+            efficiency3=-costs.at["solid biomass", "CO2 intensity"],
+        )
+        n.add(
+            "Link",
+            spatial.cement.heat,
+            suffix = " waste",
+            bus0=spatial.oil.non_sequestered_hvc,
+            bus1=spatial.cement.heat,
+            bus2=spatial.cement.nodes + " emission",
+            carrier="cement heat waste",
+            p_nom=1e6,
+            efficiency=0.9,
+            efficiency2=costs.at["oil", "CO2 intensity"],
+        )
+        n.add(
+            "Link",
+            spatial.cement.nodes,
+            suffix = " heat gas",
+            bus0=spatial.gas.nodes,
+            bus1=spatial.cement.heat,
+            bus2=spatial.cement.nodes + " emission",
+            carrier="cement heat gas",
+            p_nom=1e6,
+            efficiency=1,
+            efficiency2=costs.at["gas", "CO2 intensity"],
+        )
+
         # clinker production
-        gas_input = costs.at["cement dry clinker", "gas-input"] + costs.at["cement dry clinker", "heat-input"]
+        gas_input = costs.at["cement dry clinker", "gas-input"]
+        heat_input = costs.at["cement dry clinker", "heat-input"]
         electricity_input = costs.at["cement dry clinker", "electricity-input"]
         # process emission from calcination + gas emissions
         # https://www.ipcc-nggip.iges.or.jp/efdb/ef_detail.php
-        co2_emission = 0.5071/gas_input + costs.at["gas", "CO2 intensity"]
+        co2_emission = 0.5071/heat_input + costs.at["gas", "CO2 intensity"]*gas_input/heat_input
         n.add("Carrier", "cement kiln")
         n.add(
             "Link",
             spatial.clinker.nodes,
             suffix = " kiln",
-            bus0=spatial.gas.nodes,
+            bus0=spatial.cement.heat,
             bus1=spatial.clinker.nodes,
-            bus2=spatial.nodes,
-            bus3=spatial.cement.nodes + " emission",
+            bus2=spatial.gas.nodes,
+            bus3=spatial.nodes,
+            bus4=spatial.cement.nodes + " emission",
             carrier="cement kiln",
             p_nom_extendable=True,
-            capital_cost=costs.at["cement dry clinker", "capital_cost"] / gas_input,
-            efficiency=1/gas_input,
-            efficiency2=-electricity_input/gas_input,
-            efficiency3=co2_emission,
+            capital_cost=costs.at["cement dry clinker", "capital_cost"] / heat_input,
+            efficiency=1/heat_input,
+            efficiency2=-gas_input/heat_input,
+            efficiency3=-electricity_input/heat_input,
+            efficiency4=co2_emission,
             lifetime=costs.at["cement dry clinker", "lifetime"],
         )
 
@@ -7261,6 +7318,8 @@ def add_pcipmi_links(
         delay = carrier_networks["CO2"]["options"]["delay"]
 
     projects = pd.read_csv(links_path, index_col=0, dtype={"bus0": str, "bus1": str})
+    if investment_year > 2035:
+        delay+=10
     logger.info(f"Activating PCI/PMI {carrier}s commissioned by {investment_year}.")
     
     # Add delay
@@ -7277,15 +7336,16 @@ def add_pcipmi_links(
     )
     duplicates = existing_links.loc[existing_links.bus_set.isin(pcipmi_links_set)].index
 
-    logger.info(
-        f"- replacing {len(duplicates)} existing {carrier}s with PCI/PMI projects of the same bus0 and bus1"
-    )
-    n.links = n.links.drop(duplicates)
+    if not investment_year > 2035:
+        logger.info(
+            f"- replacing {len(duplicates)} existing {carrier}s with PCI/PMI projects of the same bus0 and bus1"
+        )
+        n.links = n.links.drop(duplicates)
+
     projects.loc[:, "carrier"] += " pcipmi"
     n.add(
         "Link",
         projects.index,
-        p_min_pu=-1,  # allow all PCI/PMI projects to be used in both directions
         capital_cost=capital_cost_carrier * projects.length.values,
         lifetime=lifetime_carrier,
         p_nom_extendable=False,
@@ -7293,6 +7353,7 @@ def add_pcipmi_links(
     )
 
     # Deactivate links newer than investment_year
+    investment_year=2035
     b_future_link = n.links["build_year"] > investment_year
     n.links.loc[b_future_link, "active"] = False
 
@@ -7400,6 +7461,8 @@ def add_pcipmi_stores(
     logger.info(f"Adding PCI/PMI stores: Carrier {carrier}.")
 
     delay = pcipmi_projects["options"]["delay"]
+    if investment_year > 2035:
+        delay+=10
     # Add delay
     stores["build_year"] = stores["build_year"] + delay
     logger.info(f"Adding a delay of {delay} years to the build year.")
@@ -7460,6 +7523,8 @@ def add_pcipmi_stores(
     logger.info(f"Added {len(stores)} {carrier} stores.")
 
     # Deactivate stores newer than investment_year
+    if investment_year > 2035:
+        investment_year=2035
     b_future_store = n.stores["build_year"] > investment_year
     n.stores.loc[b_future_store, "active"] = False
 
@@ -7528,7 +7593,7 @@ if __name__ == "__main__":
             clusters="89",
             ll="vopt",
             sector_opts="none",
-            planning_horizons="2035",
+            planning_horizons="2025",
             run="northern_lights",
         )
 
