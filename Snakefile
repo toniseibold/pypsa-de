@@ -72,7 +72,10 @@ include: "rules/retrieve.smk"
 include: "rules/build_electricity.smk"
 include: "rules/build_sector.smk"
 include: "rules/solve_electricity.smk"
+include: "rules/solve_again.smk"
+include: "rules/solve_sweep.smk"
 include: "rules/postprocess.smk"
+include: "rules/postprocess_paper.smk"
 include: "rules/development.smk"
 
 

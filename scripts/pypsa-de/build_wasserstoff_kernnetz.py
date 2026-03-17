@@ -605,4 +605,9 @@ if __name__ == "__main__":
         kernnetz_cf["force_all_ipcei_pci"],
     )
 
+    if snakemake.params.pcipmi_projects:
+        logger.info("Filtering out pci/pmi projects which will be added in prepare_sector_network later.")
+        # filter out
+        wasserstoff_kernnetz = wasserstoff_kernnetz[(wasserstoff_kernnetz.ipcei=="no") | (wasserstoff_kernnetz.pci=="no")]
+
     wasserstoff_kernnetz.to_csv(snakemake.output.cleaned_wasserstoff_kernnetz)

@@ -105,3 +105,8 @@ CLAUDE.local.md
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+/report
+/eem_paper
+.ipynb
+/scripts/pypsa-de/additional_functionality_perfect.py

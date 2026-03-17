@@ -728,17 +728,21 @@ def add_h2_derivate_limit(n, investment_year, limits_volume_max):
 
         logger.info(f"limiting H2 derivate imports in {ct} to {limit / 1e6} TWh/a")
 
+        if "EU shipping methanol" in n.buses.index:
+            suffix = "shipping "
+        else:
+            suffix = ""
         incoming = n.links.loc[
             [
                 "EU renewable oil -> DE oil",
-                "EU methanol -> DE methanol",
+                f"EU {suffix}methanol -> DE {suffix}methanol",
                 "EU renewable gas -> DE gas",
             ]
         ].index
         outgoing = n.links.loc[
             [
                 "DE renewable oil -> EU oil",
-                "DE methanol -> EU methanol",
+                f"DE {suffix}methanol -> EU {suffix}methanol",
                 "DE renewable gas -> EU gas",
             ]
         ].index
@@ -830,7 +834,10 @@ def adapt_nuclear_output(n):
 def additional_functionality(n, snapshots, snakemake):
     logger.info("Adding Ariadne-specific functionality")
 
-    investment_year = int(snakemake.wildcards.planning_horizons[-4:])
+    try:
+        investment_year = int(snakemake.wildcards.planning_horizons[-4:])
+    except:
+        investment_year = 2035
     constraints = snakemake.params.solving["constraints"]
 
     add_capacity_limits(
@@ -873,3 +880,30 @@ def additional_functionality(n, snapshots, snakemake):
 
     if investment_year == 2020:
         adapt_nuclear_output(n)
+
+    c = snakemake.wildcards.get("column", None)
+
+    if c == "low_electrolysis":
+        logger.info("Constrain installed H2 capacity")
+        index = n.links[n.links.carrier=="H2 Electrolysis"].index
+        n.links.loc[index, "p_min"] = 0
+        n.links.loc[index, "p_nom_opt"] = 0
+        n.links.loc[index, "p_nom_extendable"] = True
+        rhs = 120*1e3
+
+        nom = n.model["Link-p_nom"].loc[index]
+        lhs = nom.sum()
+
+        cname = "H2 Electrolysis capacity limit"
+        n.model.add_constraints(
+            lhs <= rhs,
+            name=f"GlobalConstraint-{cname}",
+        )
+        n.add(
+            "GlobalConstraint",
+            cname,
+            constant=rhs,
+            sense="<=",
+            type="",
+            carrier_attribute="",
+        )

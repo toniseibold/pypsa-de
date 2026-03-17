@@ -17,6 +17,9 @@ rule add_existing_baseyear:
         add_district_heating_subnodes=config_provider(
             "sector", "district_heating", "subnodes", "enable"
         ),
+        countries=config_provider("countries"),
+        MWh_NH3_per_tNH3=config_provider("industry", "MWh_NH3_per_tNH3"),
+        MWh_MeOH_per_tMeOH=config_provider("industry", "MWh_MeOH_per_tMeOH"),
     input:
         network=lambda w: (
             resources(
@@ -43,6 +46,10 @@ rule add_existing_baseyear:
         ),
         heating_efficiencies=resources("heating_efficiencies.csv"),
         custom_powerplants=resources("german_chp_base_s_{clusters}.csv"),
+        regions_onshore=resources("regions_onshore_base_s_{clusters}.geojson"),
+        ammonia="data/ammonia_plants.csv",
+        isi_database="data/1-s2.0-S0196890424010586-mmc2.xlsx",
+        gem_gspt="data/Global-Cement-and-Concrete-Tracker_July-2025.xlsx",
     output:
         resources(
             "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_brownfield.nc"
@@ -54,7 +61,7 @@ rule add_existing_baseyear:
         planning_horizons=config["scenario"]["planning_horizons"][0],  #only applies to baseyear
     threads: 1
     resources:
-        mem_mb=3000,
+        mem_mb=8000,
     log:
         logs(
             "add_existing_baseyear_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.log"
@@ -156,6 +163,14 @@ rule solve_sector_network_myopic:
             if config["solving"]["options"]["store_model"]
             else []
         ),
+        h2_links=RESULTS
+        + "topology/H2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        co2_links=RESULTS
+        + "topology/CO2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        co2_buses=RESULTS
+        + "topology/CO2_buses_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        co2_stores=RESULTS
+        + "topology/CO2_stores_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
     shadow:
         shadow_config
     log:
