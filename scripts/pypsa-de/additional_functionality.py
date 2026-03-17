@@ -788,3 +788,30 @@ def additional_functionality(n, snapshots, snakemake):
 
     if investment_year == 2020:
         adapt_nuclear_output(n)
+
+    c = snakemake.wildcards.get("column", None)
+
+    if c == "low_electrolysis":
+        logger.info("Constrain installed H2 capacity")
+        index = n.links[n.links.carrier=="H2 Electrolysis"].index
+        n.links.loc[index, "p_min"] = 0
+        n.links.loc[index, "p_nom_opt"] = 0
+        n.links.loc[index, "p_nom_extendable"] = True
+        rhs = 120*1e3
+
+        nom = n.model["Link-p_nom"].loc[index]
+        lhs = nom.sum()
+
+        cname = "H2 Electrolysis capacity limit"
+        n.model.add_constraints(
+            lhs <= rhs,
+            name=f"GlobalConstraint-{cname}",
+        )
+        n.add(
+            "GlobalConstraint",
+            cname,
+            constant=rhs,
+            sense="<=",
+            type="",
+            carrier_attribute="",
+        )

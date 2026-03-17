@@ -37,7 +37,7 @@ def isi_data(
     # partial multiplied by volume
     df_co2_stored.loc["naphtha for industry"] = df_co2_stored.loc["process emissions CC"].mul(partial.loc["naphtha for industry"])
     df_co2_stored.loc["methanol-to-olefins/aromatics"] = df_co2_stored.loc["process emissions CC"].mul(partial.loc["methanol-to-olefins/aromatics"])
-    df_co2_stored.loc["process_emissions CC"] = df_co2_stored.loc["process emissions CC"].mul(partial.loc["process emissions"])
+    df_co2_stored.loc["process emissions CC"] = df_co2_stored.loc["process emissions CC"].mul(partial.loc["process emissions"])
     
     # Taking care of sequestration not transport:
     if snakemake.params.carrier_networks["CO2"]["enable"]:
@@ -198,6 +198,48 @@ def get_h2(
     H2_EU.to_csv(snakemake.output.h2_EU)
 
 
+def get_infrastructure(
+        n: pypsa.Network
+)->None:
+
+    """"
+    Extracting the h2 infrastructure for balance plots later on.
+
+    Parameters
+    ----------
+    n : pypsa.Network
+    """
+
+    logger.info("Getting h2 infrastructure for DE and EU")
+
+    data = pd.DataFrame(columns=["DE", "EU"], index=["H2 pipeline GWkm", "CO2 pipeline Mtkm"])
+    for carrier in ["H2 pipeline", "CO2 pipeline"]:
+        # get all h2 pipelines [GWkm]
+        pipelines = n.links[(n.links.carrier.str.contains("H2 pipeline")) & (n.links.active)].index
+        length = n.links.loc[pipelines, "length"]
+        capacity = n.links.loc[pipelines, "p_nom"].fillna(n.links.loc[pipelines, "p_nom_opt"])
+        GWkm = (length * capacity).sum() / 1e6
+
+        pipelines_de = n.links[
+            (n.links.carrier.str.contains("H2 pipeline")) & 
+            (n.links.active) &
+            ((n.links.bus0.str[:2] == "DE") | (n.links.bus1.str[:2] == "DE"))
+        ].index
+        length_de = n.links.loc[pipelines_de, "length"]
+        capacity_de = n.links.loc[pipelines_de, "p_nom"]
+        GWkm_de = (length_de * capacity_de).sum() / 1e6
+
+        if carrier == "CO2 pipeline":
+            data.loc["CO2 pipeline Mtkm", "DE"] = GWkm_de
+            data.loc["CO2 pipeline Mtkm", "EU"] = GWkm
+        else:
+            data.loc["H2 pipeline GWkm", "DE"] = GWkm_de
+            data.loc["H2 pipeline GWkm", "EU"] = GWkm
+
+    logger.info("Saving infrastructure data")
+    data.to_csv(snakemake.output.infrastructure)
+
+
 
 if __name__ == "__main__":
     if "snakemake" not in globals():
@@ -221,5 +263,7 @@ if __name__ == "__main__":
     get_co2_stored(n)
 
     get_h2(n)
+
+    get_infrastructure(n)
 
     del n

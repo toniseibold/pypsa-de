@@ -34,6 +34,18 @@ endo_H2:
     H2:
       enable: false
 
+endo_H2_sweep:
+# endogenous optimization of h2 network
+# see if co-optimizing leads to more co2 pipelines
+  wasserstoff_kernnetz:
+    enable: false
+    force_all_ipcei_pci: false
+  carrier_networks:
+    CO2:
+      enable: false
+    H2:
+      enable: false
+
 pcipmi_H2_+:
 # forcing all pcipmi projects
 # endogenous extension of H2 allowed
@@ -59,36 +71,40 @@ onshore_sequestration:
       - optimistic estimate aquifer Mt
       include_onshore: true
 
-no_early_retirement:
-  sector:
-    bof_retirement_date: false
-
-seq_90:
-  sector:
-    co2_sequestration_potential:
-      2035: 90
-
-seq_80:
-  sector:
-    co2_sequestration_potential:
-      2035: 80
-
-seq_70:
-  sector:
-    co2_sequestration_potential:
-      2035: 70
-
-seq_60:
-  sector:
-    co2_sequestration_potential:
-      2035: 60
-
 seq_50:
   sector:
     co2_sequestration_potential:
       2035: 50
 
-northern_lights:
-# remove sequestration potential in North Sea for Germany
-# Add shipping route Germany - Northern Lights
-# Done in modify_prenetwork
+onshore_sequestration_endo:
+# endogenous optimization of h2 network
+# see if co-optimizing leads to more co2 pipelines
+  sector:
+    regional_co2_sequestration_potential:
+      enable: true
+      attribute:
+      - optimistic estimate Mt
+      - optimistic estimate GAS Mt
+      - optimistic estimate OIL Mt
+      - optimistic estimate aquifer Mt
+      include_onshore: true
+  wasserstoff_kernnetz:
+    enable: false
+    force_all_ipcei_pci: false
+  carrier_networks:
+    CO2:
+      enable: false
+    H2:
+      enable: false
+
+no_north_sea_endo:
+# endogenous optimization of h2 network
+# see if co-optimizing leads to more co2 pipelines
+  wasserstoff_kernnetz:
+    enable: false
+    force_all_ipcei_pci: false
+  carrier_networks:
+    CO2:
+      enable: false
+    H2:
+      enable: false

@@ -856,7 +856,7 @@ def add_eu_bus(n, x=-5.5, y=46):
     n.add("Carrier", "none")
 
 
-def add_co2_tracking(n, costs, options, sequestration_potential_file=None):
+def add_co2_tracking(n, costs, options, sequestration_potential_file=None, investment_year=None):
     """
     Add CO2 tracking components to the network including atmospheric CO2,
     CO2 storage, and sequestration infrastructure.
@@ -934,7 +934,7 @@ def add_co2_tracking(n, costs, options, sequestration_potential_file=None):
     )
     n.add("Carrier", "co2 stored")
 
-    if options["regional_co2_sequestration_potential"]["enable"]:
+    if options["regional_co2_sequestration_potential"]["enable"] and investment_year > 2025:
         if sequestration_potential_file is None:
             raise ValueError(
                 "sequestration_potential_file must be provided when "
@@ -1031,7 +1031,7 @@ def add_co2_tracking(n, costs, options, sequestration_potential_file=None):
             build_year=snakemake.params.planning_horizons[0],
         )
 
-    else:
+    elif investment_year > 2025:
         # this tracks CO2 sequestered, e.g. underground
         sequestration_buses = pd.Index(spatial.co2.nodes).str.replace(
             " stored", " sequestered"
@@ -2029,6 +2029,7 @@ def add_storage_and_grids(
     gas_input_nodes,
     spatial,
     options,
+    investment_year,
 ):
     """
     Add storage and grid infrastructure to the network including hydrogen, gas, and battery systems.
@@ -2317,7 +2318,7 @@ def add_storage_and_grids(
                 lifetime=costs.at["CH4 (g) pipeline", "lifetime"],
             )
 
-    if options["H2_retrofit"]:
+    if options["H2_retrofit"] and investment_year > 2025:
         logger.info("Add retrofitting options of existing CH4 pipes to H2 pipes.")
 
         fr = "gas pipeline"
@@ -2342,7 +2343,7 @@ def add_storage_and_grids(
             lifetime=costs.at["H2 (g) pipeline repurposed", "lifetime"],
         )
 
-    if options["H2_network"]:
+    if options["H2_network"] and investment_year > 2025:
         logger.info("Add options for new hydrogen pipelines.")
 
         h2_pipes = create_network_topology(
@@ -6016,7 +6017,7 @@ def add_industry(
             bus2=spatial.nodes,
             carrier="cement finishing",
             p_nom_extendable=True,
-            capital_cost=costs.at["cement finishing", "capital_cost"] / gas_input,
+            capital_cost=costs.at["cement finishing", "capital_cost"] / clinker_input,
             efficiency=1/clinker_input,
             efficiency2=-electricity_input,
             lifetime=costs.at["cement finishing", "lifetime"],
@@ -7318,29 +7319,12 @@ def add_pcipmi_links(
         delay = carrier_networks["CO2"]["options"]["delay"]
 
     projects = pd.read_csv(links_path, index_col=0, dtype={"bus0": str, "bus1": str})
-    if investment_year > 2035:
-        delay+=10
-    logger.info(f"Activating PCI/PMI {carrier}s commissioned by {investment_year}.")
     
     # Add delay
     projects["build_year"] = projects["build_year"] + delay
     logger.info(f"Adding a delay of {delay} years to the build year.")
-
-    # Drop existing links that have the same bus0 and bus1 as the PCI/PMI projects
-    existing_links = n.links.query("carrier == @carrier").copy()
-    existing_links["bus_set"] = existing_links.apply(
-        lambda row: frozenset([row.bus0, row.bus1]), axis=1
-    )
-    pcipmi_links_set = projects.apply(
-        lambda row: frozenset([row.bus0, row.bus1]), axis=1
-    )
-    duplicates = existing_links.loc[existing_links.bus_set.isin(pcipmi_links_set)].index
-
-    if not investment_year > 2035:
-        logger.info(
-            f"- replacing {len(duplicates)} existing {carrier}s with PCI/PMI projects of the same bus0 and bus1"
-        )
-        n.links = n.links.drop(duplicates)
+    projects = projects[projects.build_year <= investment_year]
+    logger.info(f"Dropping PCI/PMI projects that are now beyond the investment year {investment_year-delay}.")
 
     projects.loc[:, "carrier"] += " pcipmi"
     n.add(
@@ -7351,11 +7335,6 @@ def add_pcipmi_links(
         p_nom_extendable=False,
         **projects,
     )
-
-    # Deactivate links newer than investment_year
-    investment_year=2035
-    b_future_link = n.links["build_year"] > investment_year
-    n.links.loc[b_future_link, "active"] = False
 
 
 def add_pcipmi_h2_buses(
@@ -7379,19 +7358,6 @@ def add_pcipmi_h2_buses(
         x=n.buses.loc[nodes, "x"].rename(lambda x: x + " H2"),
         y=n.buses.loc[nodes, "y"].rename(lambda x: x + " H2"),
         )
-
-    # n.add(
-    #     "Link",
-    #     nodes + " H2 Electrolysis",
-    #     bus1=nodes + " H2",
-    #     bus0=nodes,
-    #     p_nom_extendable=True,
-    #     carrier="H2 Electrolysis",
-    #     efficiency=costs.at["electrolysis", "efficiency"],
-    #     capital_cost=costs.at["electrolysis", "capital_cost"],
-    #     lifetime=costs.at["electrolysis", "lifetime"],
-    #     location = nodes,
-    # )
 
 
 def add_pcipmi_co2_buses(
@@ -7461,8 +7427,7 @@ def add_pcipmi_stores(
     logger.info(f"Adding PCI/PMI stores: Carrier {carrier}.")
 
     delay = pcipmi_projects["options"]["delay"]
-    if investment_year > 2035:
-        delay+=10
+
     # Add delay
     stores["build_year"] = stores["build_year"] + delay
     logger.info(f"Adding a delay of {delay} years to the build year.")
@@ -7487,7 +7452,7 @@ def add_pcipmi_stores(
         n.add(
             "Bus",
             missing_co2_buses[0],
-            carrier="co2 sequestered",
+            carrier="co2 sequestered pcipmi",
             unit="t_co2",
             x=n.buses.loc[missing_co2_buses.index, "x"].rename(lambda x: x + " co2 sequestered"),
             y=n.buses.loc[missing_co2_buses.index, "y"].rename(lambda x: x + " co2 sequestered"),
@@ -7500,7 +7465,7 @@ def add_pcipmi_stores(
             bus1=missing_co2_buses[0].values,
             marginal_cost=options["co2_sequestration_cost"],
             capital_cost=0.1, # TODO: needed?
-            carrier="co2 sequestered",
+            carrier="co2 sequestered pcipmi",
             efficiency=1.0,
             p_nom_extendable=True,
         )    
@@ -7523,9 +7488,8 @@ def add_pcipmi_stores(
     logger.info(f"Added {len(stores)} {carrier} stores.")
 
     # Deactivate stores newer than investment_year
-    if investment_year > 2035:
-        investment_year=2035
-    b_future_store = n.stores["build_year"] > investment_year
+    cutout_year = 2035
+    b_future_store = n.stores["build_year"] > cutout_year
     n.stores.loc[b_future_store, "active"] = False
 
 
@@ -7593,8 +7557,8 @@ if __name__ == "__main__":
             clusters="89",
             ll="vopt",
             sector_opts="none",
-            planning_horizons="2025",
-            run="northern_lights",
+            planning_horizons="2035",
+            run="endo_H2",
         )
 
     configure_logging(snakemake)  # pylint: disable=E0606
@@ -7669,6 +7633,7 @@ if __name__ == "__main__":
         costs,
         options,
         sequestration_potential_file=snakemake.input.sequestration_potential,
+        investment_year=investment_year,
     )
 
     add_generation(
@@ -7691,14 +7656,15 @@ if __name__ == "__main__":
         gas_input_nodes=gas_input_nodes,
         spatial=spatial,
         options=options,
+        investment_year=investment_year,
     )
-
+    # PCIPMI projects
     carrier_networks = snakemake.params.carrier_networks
     pcipmi_projects = snakemake.params.pcipmi_projects
 
-    if carrier_networks["H2"]["enable"] and investment_year > 2025:
-        spatial_pcipmi = add_pcipmi_buses_offshore(n, snakemake.input.buses_pcipmi_offshore)
+    spatial_pcipmi = add_pcipmi_buses_offshore(n, snakemake.input.buses_pcipmi_offshore)
 
+    if investment_year > 2025:
         # adding electrolysis units at the offshore buses
         add_pcipmi_h2_buses(
             n,
@@ -7722,7 +7688,7 @@ if __name__ == "__main__":
             pcipmi_projects,
             options,
         )
-    if carrier_networks["CO2"]["enable"] and investment_year > 2025:
+
         add_pcipmi_co2_buses(
             n,
             spatial_pcipmi.nodes,
@@ -7744,10 +7710,7 @@ if __name__ == "__main__":
             pcipmi_projects,
             options,
         )
-    if carrier_networks["H2"]["enable"] and investment_year > 2025:
-        # Drop PCI-PMI offshore elec buses
-        # n.buses.drop(spatial_pcipmi.nodes, inplace=True)
-        n.links = _remove_dangling_branches(n.links, n.buses) # PCI-PMI AC offshore buses are not needed
+        n.links = _remove_dangling_branches(n.links, n.buses) # PCI-PMI AC
 
     if options["transport"]:
         add_land_transport(

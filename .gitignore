@@ -94,5 +94,6 @@ CLAUDE.md
 .github/copilot-instructions.md
 
 /report
+/eem_paper
 .ipynb
 /scripts/pypsa-de/additional_functionality_perfect.py

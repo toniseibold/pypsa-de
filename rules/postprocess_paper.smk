@@ -14,6 +14,7 @@ rule extract_data:
         co2_stored_EU=RESULTS + "EU_co2_stored_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
         h2_DE=RESULTS + "DE_h2_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
         h2_EU=RESULTS + "EU_h2_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        infrastructure=RESULTS + "infrastructure_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
         fh_co2_stored=RESULTS + "fraunhofer_co2_stored_balance_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
         fh_co2_flow=RESULTS + "fraunhofer_co2_flow_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
     log:
@@ -68,15 +69,15 @@ rule plot_maps:
     input:
         networks=expand(
         RESULTS
-        + "networks/base_s_{clusters}_{opts}_{sector_opts}_2035.nc",
+        + "networks/base_s_{clusters}_{opts}_{sector_opts}_2045.nc",
         **config["scenario"],
         run=config["run"]["name"],
         ),
         regions="resources/regions_onshore_base_s_{clusters}.geojson",
     log:
-        RESULTS + "logs/plot_maps_{clusters}_{opts}_{sector_opts}_2035.log",
+        RESULTS + "logs/plot_maps_{clusters}_{opts}_{sector_opts}_2045.log",
     benchmark:
-        RESULTS + "benchmark/plot_maps_{clusters}_{opts}_{sector_opts}_2035",
+        RESULTS + "benchmark/plot_maps_{clusters}_{opts}_{sector_opts}_2045",
     conda:
         "../envs/environment.yaml"
     script:

@@ -28,6 +28,8 @@ scenario_dict = {
     "no_early_retirement": "No early BF-BOF retirement",
     "seq_50": "Low Seq Potential",
     "northern_lights": "No North Sea Seq",
+    "onshore_sequestration_endo": "Onshore Seq endogenous",
+    "no_north_sea_endo": "No North Sea endogenous",
 }
 
 color_h2_pipe = "#b3f3f4"
@@ -107,64 +109,37 @@ def plot_co2_map(
     linewidth_factor = 1e3
     line_lower_threshold = 0
 
-    # flow
-    flow = n.statistics.transmission(groupby=False, bus_carrier="co2 stored") # .div(1e6)
-
-    if not flow.empty:
-        flow_reversed_mask = flow.index.get_level_values(1).str.contains("reversed")
-        flow_reversed = flow[flow_reversed_mask].rename(
-            lambda x: x.replace("-reversed", "")
-        )
-        flow = flow[~flow_reversed_mask].subtract(flow_reversed, fill_value=0)
-    flow.index = flow.index.set_levels(
-        flow.index.levels[1].str.replace("-2035", "", regex=False), level=1,
-    )
-
-    # Get onshore co2 balances
     co2_balance = n.statistics.energy_balance(bus_carrier="co2 stored", groupby=["bus", "carrier"]).droplevel("component")
     co2_balance = co2_balance[~co2_balance.index.get_level_values(1).str.contains("pipeline")]
 
     sequestration = co2_balance[(co2_balance.index.get_level_values(0).str.contains("offshore")) | (co2_balance.index.get_level_values(0).str.contains("PCI"))]
     co2_supply = co2_balance[~(co2_balance.index.get_level_values(0).str.contains("offshore")) | ~(co2_balance.index.get_level_values(0).str.contains("PCI"))]
     co2_supply = co2_supply.rename(lambda x: x.replace(" offshore 0 co2 stored", ""), level=0)
-    current = co2_supply[co2_supply > 1e3].index.get_level_values(1).unique()
+    co2_supply = co2_supply.drop("co2 sequestered", level=1)
 
     bus_colors = {carrier: tech_colors[carrier] for carrier in co2_supply.index.get_level_values(1).unique()}
     bus_colors["co2 sequestered"] = tech_colors["co2 sequestered"]
 
     n.links.drop(
-        n.links.index[~n.links.carrier.str.contains("CO2 pipeline")], inplace=True
+        n.links.index[~(n.links.carrier.str.contains("CO2 pipeline")) | ~(n.links.active)], inplace=True
     )
-    # n.links.drop(
-    #     n.links[n.links.p_nom_opt <= 0].index, inplace=True
-    # )
+    n.links.drop(
+        n.links[n.links.p_nom_opt <= 0].index, inplace=True
+    )
     # pipelines
-    co2_pipes = n.links[n.links.carrier.str.contains("CO2 pipeline")].p_nom_opt
+    co2_pipes = n.links[(n.links.carrier == "CO2 pipeline")].p_nom_opt
+    co2_pipes_pcipmi = n.links[(n.links.carrier == "CO2 pipeline pcipmi")].p_nom_opt
 
-    link_widths_total = co2_pipes / linewidth_factor
-
-    # drop all reversed pipe
-    n.links.drop(n.links.index[n.links.index.str.contains("reversed")], inplace=True)
-    n.links.rename(index=lambda x: x.split("-2")[0], inplace=True)
-    n.links = n.links.groupby(level=0).agg(
-        {
-            **{
-                col: "first" for col in n.links.columns if col != "p_nom_opt"
-            },  # Take first value for all columns except 'p_nom_opt'
-            "p_nom_opt": "sum",  # Sum values for 'p_nom_opt'
-        }
-    )
-    link_widths_total = link_widths_total.reindex(n.links.index).fillna(0.0)
-    link_widths_total[n.links.p_nom_opt < line_lower_threshold] = 0.0
+    link_widths_endo = co2_pipes / linewidth_factor
+    link_widths_pcipmi = co2_pipes_pcipmi / linewidth_factor
 
     carriers_pipe = ["CO2 pipeline", "CO2 pipeline pcipmi"]
-    total = n.links.p_nom_opt.where(n.links.carrier.isin(carriers_pipe), other=0.0)
-
-    link_widths_total = total / linewidth_factor
-    link_widths_total[n.links.p_nom_opt < line_lower_threshold] = 0.0
 
     n.links.bus0 = n.links.bus0.str.replace(" co2 stored", "")
     n.links.bus1 = n.links.bus1.str.replace(" co2 stored", "")
+
+    # co2_supply[co2_supply.index.get_level_values(0).str.startswith("DE")]
+    current = co2_supply[co2_supply > 1e3].index.get_level_values(1).unique()
 
     n.plot.map(
         geomap=True,
@@ -172,8 +147,7 @@ def plot_co2_map(
         bus_split_circles=True,
         bus_colors=bus_colors,
         link_colors=tech_colors["CO2 pipeline"],
-        link_widths=link_widths_total,
-        flow=flow/1e5,
+        link_widths=link_widths_endo,
         branch_components=["Link"],
         line_widths=0,
         ax=ax,
@@ -184,7 +158,9 @@ def plot_co2_map(
         bus_sizes=sequestration/bus_size_factor,
         bus_split_circles=True,
         bus_colors={"co2 sequestered": "#f2682f"},
-        link_widths=0,
+        link_widths=link_widths_pcipmi,
+        branch_components=["Link"],
+        link_colors="#57232d",
         line_widths=0,
         ax=ax,
         **map_opts,
@@ -192,12 +168,10 @@ def plot_co2_map(
 
     regions.plot(
         ax=ax,
-        column="CO2",
-        cmap="Purples",
-        linewidths=0,
+        facecolor="white",
+        edgecolor="grey",
+        linewidth=0.1,
         legend=False,
-        vmax=100,
-        vmin=30,
     )
 
     ax.set_title(title)
@@ -363,25 +337,25 @@ def plot_maps(
         plot_h2_map(n, regions, axes2[i], scenario_dict[scenarios[i]])
         del network, n
     
-    ### co2 map
-    fig1.suptitle("2035", fontsize=16)
-    # Colorbar axis: [left, bottom, width, height]
-    cbar_ax = fig1.add_axes([0.3, 0.02, 0.4, 0.04])  # center it
-    # Set up colorbar
-    sm = cm.ScalarMappable(
-        cmap="Purples",
-        norm=mcolors.Normalize(vmin=30, vmax=100)
-    )
-    sm.set_array([])
+    # ### co2 map
+    # fig1.suptitle("2045", fontsize=16)
+    # # Colorbar axis: [left, bottom, width, height]
+    # cbar_ax = fig1.add_axes([0.3, 0.02, 0.4, 0.04])  # center it
+    # # Set up colorbar
+    # sm = cm.ScalarMappable(
+    #     cmap="Purples",
+    #     norm=mcolors.Normalize(vmin=30, vmax=100)
+    # )
+    # sm.set_array([])
 
-    # Draw horizontal colorbar
-    cbar = fig1.colorbar(
-        sm,
-        cax=cbar_ax,
-        orientation="horizontal",
-        extend="max",
-    )
-    cbar.set_label("€/t")
+    # # Draw horizontal colorbar
+    # cbar = fig1.colorbar(
+    #     sm,
+    #     cax=cbar_ax,
+    #     orientation="horizontal",
+    #     extend="max",
+    # )
+    # cbar.set_label("€/t")
 
     sizes = [10, 5]
     labels = [f"{s} Mt" for s in sizes]
@@ -435,6 +409,16 @@ def plot_maps(
     )
 
     pypsa.plot.maps.static.add_legend_patches(ax1[1,0], colors, labels, legend_kw=legend_kw)
+
+    plot_colors = {"CO2 Pipeline": tech_colors["CO2 pipeline"], "PCIPMI CO2 Pipeline": "#57232d"}
+    colors = list(plot_colors.values())
+    labels = list(plot_colors.keys())
+    legend_kw = dict(
+        loc="lower left",
+        bbox_to_anchor=(0, -0.5),
+        frameon=False,
+    )
+    pypsa.plot.maps.static.add_legend_patches(axes1[6], colors, labels, legend_kw=legend_kw)
 
     ### h2 map
     sizes = [30, 10]
@@ -521,7 +505,7 @@ def plot_maps(
     )
     cbar.set_label("€/MWh")
 
-    fig2.suptitle("2035", fontsize=16)
+    fig2.suptitle("2045", fontsize=16)
 
     fig1.savefig(save_dir + f"/EU_co2_stored_map_{year}.pdf", bbox_inches="tight")
     fig2.savefig(save_dir + f"/EU_h2_map_{year}.pdf", bbox_inches="tight")
@@ -546,7 +530,7 @@ if __name__ == "__main__":
             opts="",
             ll="vopt",
             sector_opts="none",
-            run="northern_lights",
+            run="endo_H2",
         )
 
     configure_logging(snakemake)

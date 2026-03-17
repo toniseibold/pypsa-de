@@ -263,11 +263,11 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "solve_operations_sector_network",
             opts="",
-            clusters="49",
+            clusters="89",
             sector_opts="none", 
             planning_horizons="2035",
-            column="no_co2_network",
-            run="pcipmi_H2_+",
+            column="low_electrolysis",
+            run="no_co2_network",
             configfiles="config/config.de.yaml",
         )
  
@@ -305,10 +305,6 @@ if __name__ == "__main__":
 
     set_minimum_investment(n, planning_horizons)
 
-    if c == "european_relocation" or c == "non_european_relocation":
-        # make relocation
-        # TONITODO:
-        pass
     if c == "onshore_sequestration":
         # add onshore sequestration potentials
         add_onshore_seq(n)
@@ -340,6 +336,29 @@ if __name__ == "__main__":
     if c == "high_seq_potential":
         logger.info("sequestration potential of 200 Mt/a")
         n.global_constraints.loc["co2_sequestration_limit", "constant"] = -200*1e6
+
+    if c == "low_electrolysis":
+        logger.info(f"Constraint for {c} run is added in additional functionality.")
+
+    if c == "high_industry_demand":
+        # adjust all industry related loads
+        industry_carrier=[
+            "solid biomass for industry",
+            "gas for industry",
+            "H2 for industry",
+            "industry methanol",
+            "low-temperature heat for industry",
+            "naphtha for industry",
+            "industry electricity",
+            "process emission",
+            "NH3",
+            "coal for industry",
+            "steel",
+            "cement",
+            
+        ]
+        ind_constant = n.loads[(n.loads.carrier.isin(industry_carrier)) & (n.loads.index.str.startswith("DE"))].index
+        n.loads.loc[ind_constant, "p_set"] *= 1.2
 
     # # Debugging: Load shedding
     # # if snakemake.params.solve_operations["load_shedding"]:

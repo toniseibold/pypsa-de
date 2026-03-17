@@ -13,13 +13,15 @@ logger = logging.getLogger(__name__)
 
 scenario_dict = {
     "no_co2_network": "No CO\u2082 network",
-    "frozen_H2_28": "H\u2082 + CO\u2082 (PCI 2028) frozen",
+    "frozen_H2_28": "H\u2082 + CO\u2082 (PCI 2029) frozen",
     "endo_H2": "H\u2082 + CO\u2082 endogenous",
-    "pcipmi_H2_+": "H\u2082 + CO\u2082 (PCI 2028)",
-    "onshore_sequestration": "Onshore Seq.",
+    "pcipmi_H2_+": "H\u2082 + CO\u2082 (PCI 2035)",
+    "onshore_sequestration": "Onshore Seq",
     "no_early_retirement": "No early BF-BOF retirement",
     "seq_50": "Low Seq Potential",
     "northern_lights": "No North Sea Seq",
+    "onshore_sequestration_endo": "Onshore Seq endogenous",
+    "no_north_sea_endo": "No North Sea endogenous",
 }
 
 
@@ -206,7 +208,7 @@ if __name__ == "__main__":
             opts="",
             ll="vopt",
             sector_opts="none",
-            run="northern_lights"
+            run="endo_H2"
         )
 
     configure_logging(snakemake)
@@ -216,7 +218,7 @@ if __name__ == "__main__":
     tech_colors["export"] = tech_colors["import H2"]
     tech_colors["import"] = tech_colors["import H2"]
 
-    year = 2035
+    year = 2045
     path = snakemake.input.h2_DE[0]
     save_dir = path.split("results/")[0] + "results/" + path.split("results/")[1].split("/")[0]
 
