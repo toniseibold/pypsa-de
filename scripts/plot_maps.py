@@ -317,6 +317,7 @@ def plot_h2_map(
 def plot_maps(
         paths: list,
         regions=gpd.GeoDataFrame,
+        year=int,
 ):
     """"
     Plot the carbon network for Europe and Germany.
@@ -505,7 +506,7 @@ def plot_maps(
     )
     cbar.set_label("€/MWh")
 
-    fig2.suptitle("2045", fontsize=16)
+    fig2.suptitle(year, fontsize=16)
 
     fig1.savefig(save_dir + f"/EU_co2_stored_map_{year}.pdf", bbox_inches="tight")
     fig2.savefig(save_dir + f"/EU_h2_map_{year}.pdf", bbox_inches="tight")
@@ -553,4 +554,5 @@ if __name__ == "__main__":
     plot_maps(
         paths=n_paths,
         regions=regions,
+        year=year,
     )

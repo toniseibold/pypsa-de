@@ -584,7 +584,7 @@ if __name__ == "__main__":
             opts="",
             sector="none",
             configfiles="config/config.de.yaml",
-            run="endo_H2"
+            run="pcipmi"
         )
 
     configure_logging(snakemake)
@@ -606,7 +606,6 @@ if __name__ == "__main__":
 
     # H2 pipelines
     links_h2_pipeline = gpd.read_file(snakemake.input.links_h2_pipeline).set_index("id")
-    links_h2_pipeline["tags"] = links_h2_pipeline["tags"].apply(json.loads)
     links_h2_pipeline["pci_code"] = links_h2_pipeline["tags"].apply(lambda x: x["pci_code"]).astype(str)
     links_h2_pipeline = links_h2_pipeline[~links_h2_pipeline["pci_code"].isin(exclude_projects)]
     
@@ -643,7 +642,6 @@ if __name__ == "__main__":
 
     ### CO2 pipelines
     links_co2_pipeline = gpd.read_file(snakemake.input.links_co2_pipeline).set_index("id")
-    links_co2_pipeline["tags"] = links_co2_pipeline["tags"].apply(json.loads)
     links_co2_pipeline["pci_code"] = links_co2_pipeline["tags"].apply(lambda x: x["pci_code"]).astype(str)
     links_co2_pipeline = links_co2_pipeline[~links_co2_pipeline["pci_code"].isin(exclude_projects)]
     
@@ -719,7 +717,6 @@ if __name__ == "__main__":
     ### Map stores and storage units
     stores_h2 = gpd.read_file(snakemake.input.stores_h2).set_index("id")
     stores_h2["build_year"] = stores_h2["year"] # Update build_years
-    stores_h2["tags"] = stores_h2["tags"].apply(json.loads)
     stores_h2["pci_code"] = stores_h2["tags"].apply(lambda x: x["pci_code"]).astype(str)
     stores_h2 = stores_h2[~stores_h2["pci_code"].isin(exclude_projects)]
     # rename injection to e_nom
@@ -732,7 +729,6 @@ if __name__ == "__main__":
 
     stores_co2 = gpd.read_file(snakemake.input.stores_co2).set_index("id")
     stores_co2["build_year"] = stores_co2["year"] # Update build_years
-    stores_co2["tags"] = stores_co2["tags"].apply(json.loads)
     stores_co2["pci_code"] = stores_co2["tags"].apply(lambda x: x["pci_code"]).astype(str)
     stores_co2 = stores_co2[~stores_co2["pci_code"].isin(exclude_projects)]
     stores_co2.rename(columns={"injection_rate_Mtpa": "e_nom"}, inplace=True)

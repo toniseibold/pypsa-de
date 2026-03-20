@@ -221,11 +221,13 @@ def h2_import_limits(n, investment_year, limits_volume_max):
             (n.links.carrier.isin(pipeline_carrier))
             & (n.links.bus0.str[:2] != ct)
             & (n.links.bus1.str[:2] == ct)
+            & (n.links.active)
         ]
         outgoing = n.links.index[
             (n.links.carrier.isin(pipeline_carrier))
             & (n.links.bus0.str[:2] == ct)
             & (n.links.bus1.str[:2] != ct)
+            & (n.links.active)
         ]
 
         incoming_p = (
@@ -360,11 +362,13 @@ def electricity_import_limits(n, investment_year, limits_volume_max):
             (n.links.carrier == "DC")
             & (n.links.bus0.str[:2] != ct)
             & (n.links.bus1.str[:2] == ct)
+            & (n.links.active)
         ]
         outgoing_link = n.links.index[
             (n.links.carrier == "DC")
             & (n.links.bus0.str[:2] == ct)
             & (n.links.bus1.str[:2] != ct)
+            & (n.links.active)
         ]
 
         incoming_line_p = (
@@ -557,13 +561,13 @@ def add_national_co2_budgets(n, snakemake, national_co2_budgets, investment_year
         )
 
         incoming_methanol = n.links.index[
-            n.links.index == f"EU methanol -> {ct} methanol"
+            n.links.index == f"EU shipping methanol -> {ct} shipping methanol"
         ]
         outgoing_methanol = n.links.index[
-            n.links.index == f"{ct} methanol -> EU methanol"
+            n.links.index == f"{ct} shipping methanol -> EU shipping methanol"
         ]
 
-        methanol_emissions = n.links.loc["EU industry methanol", "efficiency2"]
+        methanol_emissions = 0.248
         lhs.append(
             (
                 -1

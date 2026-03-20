@@ -218,6 +218,9 @@ rule modify_prenetwork:
         limit_cross_border_flows_ac=config_provider(
             "pypsa-de", "limit_cross_border_flows_ac"
         ),
+        industry_relocation=config_provider("sector", "industry_relocation"),
+        carrier_networks=config_provider("carrier_networks"),
+        ammonia=config_provider("sector", "ammonia"),
     input:
         network=resources(
             "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_brownfield.nc"
@@ -251,6 +254,9 @@ rule modify_prenetwork:
         regions_offshore=resources("regions_offshore_base_s_{clusters}.geojson"),
         offshore_connection_points="data/pypsa-de/offshore_connection_points.csv",
         new_industrial_energy_demand="data/pypsa-de/UBA_Projektionsbericht2025_Abbildung31_MWMS.csv",
+        pcipmi_projects=resources(
+            "pcipmi_projects/links_h2_pipeline_s_{clusters}_{opts}.csv"
+        ),
     output:
         network=resources(
             "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final.nc"
@@ -332,6 +338,7 @@ rule modify_industry_production:
 rule build_wasserstoff_kernnetz:
     params:
         kernnetz=config_provider("wasserstoff_kernnetz"),
+        pcipmi_projects=config_provider("pcipmi_projects"),
     input:
         wasserstoff_kernnetz_1=storage(
             "https://fnb-gas.de/wp-content/uploads/2024/07/2024_07_22_Anlage2_Leitungsmeldungen_weiterer_potenzieller_Wasserstoffnetzbetreiber.xlsx",

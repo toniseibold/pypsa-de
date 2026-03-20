@@ -69,15 +69,15 @@ rule plot_maps:
     input:
         networks=expand(
         RESULTS
-        + "networks/base_s_{clusters}_{opts}_{sector_opts}_2045.nc",
+        + "networks/base_s_{clusters}_{opts}_{sector_opts}_2035.nc",
         **config["scenario"],
         run=config["run"]["name"],
         ),
         regions="resources/regions_onshore_base_s_{clusters}.geojson",
     log:
-        RESULTS + "logs/plot_maps_{clusters}_{opts}_{sector_opts}_2045.log",
+        RESULTS + "logs/plot_maps_{clusters}_{opts}_{sector_opts}_2035.log",
     benchmark:
-        RESULTS + "benchmark/plot_maps_{clusters}_{opts}_{sector_opts}_2045",
+        RESULTS + "benchmark/plot_maps_{clusters}_{opts}_{sector_opts}_2035",
     conda:
         "../envs/environment.yaml"
     script:

@@ -407,6 +407,7 @@ def attach_load(
 
     # apply clustering busmap
     busmap = pd.read_csv(busmap_fn, dtype=str)
+    busmap.rename(columns={"Index": "name"}, inplace=True)
     index_col = "name" if PYPSA_V1 else "Bus"
     busmap = busmap.set_index(index_col).squeeze()
     load = load.groupby(busmap).sum().T
@@ -1230,7 +1231,7 @@ if __name__ == "__main__":
     if "snakemake" not in globals():
         from scripts._helpers import mock_snakemake
 
-        snakemake = mock_snakemake("add_electricity", clusters=60)
+        snakemake = mock_snakemake("add_electricity", clusters=89, run="pcipmi_H2_+")
     configure_logging(snakemake)  # pylint: disable=E0606
     set_scenario_config(snakemake)
 

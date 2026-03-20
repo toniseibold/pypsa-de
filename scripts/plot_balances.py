@@ -218,7 +218,7 @@ if __name__ == "__main__":
     tech_colors["export"] = tech_colors["import H2"]
     tech_colors["import"] = tech_colors["import H2"]
 
-    year = 2045
+    year = 2035
     path = snakemake.input.h2_DE[0]
     save_dir = path.split("results/")[0] + "results/" + path.split("results/")[1].split("/")[0]
 

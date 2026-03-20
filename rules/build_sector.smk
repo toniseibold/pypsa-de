@@ -1109,7 +1109,7 @@ rule build_industrial_production_per_country:
         ),
     threads: 8
     resources:
-        mem_mb=4000,
+        mem_mb=8000,
     log:
         logs("build_industrial_production_per_country.log"),
     benchmark:
@@ -1656,12 +1656,8 @@ rule prepare_sector_network:
             or config_provider("sector", "biomass_spatial")(w)
             else []
         ),
-        sequestration_potential=lambda w: (
-            resources("co2_sequestration_potential_base_s_{clusters}.geojson")
-            if config_provider(
-                "sector", "regional_co2_sequestration_potential", "enable"
-            )(w)
-            else []
+        sequestration_potential=resources(
+            "co2_sequestration_potential_base_s_{clusters}.geojson"
         ),
         network=resources("networks/base_s_{clusters}_elec_{opts}.nc"),
         eurostat=resources("eurostat_energy_balances.csv"),

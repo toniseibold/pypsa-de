@@ -1173,8 +1173,21 @@ def add_co2_atmosphere_constraint(n, snapshots):
             n.model.add_constraints(lhs <= rhs, name=f"GlobalConstraint-{name}")
 
 
+def add_empty_co2_atmosphere_store_constraint(n):
+    """
+    Ensures that the CO2 atmosphere store at the last snapshot is empty.
+    """
+    logger.info("Adding constraint for empty CO2 atmosphere store at the last snapshot.")
+    cname = "empty_co2_atmosphere_store"
+
+    last_snapshot = n.snapshots.values[-1]
+    lhs = n.model["Store-e"].loc[last_snapshot, "co2 atmosphere"]
+
+    n.model.add_constraints(lhs == 0, name=cname)
+
+
 def extra_functionality(
-        n: pypsa.Network, snapshots: pd.DatetimeIndex, planning_horizons: str | None = None, snakemake = None,
+    n: pypsa.Network, snapshots: pd.DatetimeIndex, snakemake, planning_horizons: str | None = None, additional_settings: dict = {}
 ) -> None:
     """
     Add custom constraints and functionality.
@@ -1223,7 +1236,7 @@ def extra_functionality(
             r"urban central heat|urban decentral heat|rural heat",
             case=False,
             na=False,
-        ).any():
+        ).any() and additional_settings.get("capacity_constraints", True):
             add_TES_energy_to_power_ratio_constraints(n)
             add_TES_charger_ratio_constraints(n)
 
@@ -1242,6 +1255,9 @@ def extra_functionality(
 
     if config["sector"]["imports"]["enable"]:
         add_import_limit_constraint(n, snapshots)
+    
+    if additional_settings.get("empty_co2_atmosphere_store_constraint", False):
+        add_empty_co2_atmosphere_store_constraint(n)
 
     if n.params.custom_extra_functionality:
         source_path = pathlib.Path(n.params.custom_extra_functionality).resolve()
@@ -1368,6 +1384,7 @@ def collect_kwargs(
 
         if cf_solving["post_discretization"].get("enable", False):
             logger.info("Add post-discretization parameters.")
+            cf_solving["post_discretization"].pop("enable", None)
             all_kwargs.update(cf_solving["post_discretization"])
 
         return all_kwargs, {}
@@ -1381,7 +1398,9 @@ def create_optimization_model(
     params: dict,
     model_kwargs: dict,
     solve_kwargs: dict,
+    snakemake,
     planning_horizons: str | None = None,
+    additional_settings: dict = {},
 ) -> None:
     """
     Prepare optimization problem by creating model and adding extra functionality.
@@ -1416,247 +1435,9 @@ def create_optimization_model(
 
     # Add extra functionality (custom constraints)
     logger.info("Adding extra functionality (custom constraints)...")
-    extra_functionality(n, n.snapshots, planning_horizons)
+    extra_functionality(n, n.snapshots, snakemake, planning_horizons, additional_settings=additional_settings)
 
     return n
-
-
-def discretized_capacity(
-    nom_opt: float,
-    nom_max: float,
-    unit_size: float,
-    threshold: float,
-    fractional_last_unit_size: bool,
-) -> float:
-
-    units = nom_opt // unit_size + (nom_opt % unit_size >= threshold * unit_size)
-
-    block_capacity = units * unit_size
-    if nom_max % unit_size == 0:
-        return block_capacity
-
-    if (nom_max - nom_opt) < unit_size:
-        if (
-            fractional_last_unit_size
-            and ((nom_opt % unit_size) / (nom_max % unit_size)) >= threshold
-        ):
-            return nom_max
-        if nom_max < unit_size:
-            return nom_max
-        return (nom_opt // unit_size) * unit_size
-    return block_capacity
-
-
-def discretize_branch_components(
-    link_unit_size: dict | None,
-    link_threshold: dict | None,
-    fractional_last_unit_size: bool = False,
-) -> None:
-    """Discretizes the branch components of a network based on the specified unit sizes and thresholds."""
-    link_threshold = link_threshold or {}
-
-    for carrier in (
-        link_unit_size.keys() & n.c.links.static.carrier.unique()
-    ):
-        idx = n.c.links.static.carrier == carrier
-        n.c.links.static.loc[idx, "p_nom"] = n.c.links.static.loc[
-            idx
-        ].apply(
-            lambda row: discretized_capacity(
-                nom_opt=row["p_nom_opt"],
-                nom_max=row["p_nom_max"],
-                unit_size=link_unit_size[carrier],  # noqa: B023
-                threshold=link_threshold.get(carrier, 0.3),  # noqa: B023
-                fractional_last_unit_size=fractional_last_unit_size,
-            ),
-            axis=1,
-        )
-
-
-def manual_post_discretization(n, run):
-    unit_size_H2 = snakemake.params.solving["options"]["post_discretization"]["link_unit_size"]["H2 pipeline"]
-    threshold_H2 = snakemake.params.solving["options"]["post_discretization"]["link_threshold"]["H2 pipeline"]
-
-    H2_de_vol = n.links[
-        n.links.carrier.str.contains("H2 pipeline") &
-        ~(n.links.reversed) &
-        ~(n.links.build_year==2045) &
-        ((n.links.bus0.str.startswith("DE") | (n.links.bus1.str.startswith("DE"))))
-    ].p_nom.sum()
-    H2_eu_vol = n.links[
-        n.links.carrier.str.contains("H2 pipeline") & 
-        ~(n.links.build_year==2045) &
-        ~(n.links.reversed) &
-        ~((n.links.bus0.str.startswith("DE") | (n.links.bus1.str.startswith("DE"))))
-    ].p_nom.sum()
-
-    logger.info("Selecting the endogenous H2 pipelines DE to be discretized up to a volume of 2035's capacity")
-    H2_de = n.links[
-        n.links.carrier.str.contains("H2 pipeline") &
-        ~(n.links.reversed) &
-        (n.links.build_year==2045) &
-        ((n.links.bus0.str.startswith("DE")) | (n.links.bus1.str.startswith("DE")))
-    ].index
-    n.links.loc[H2_de, "p_nom"] = n.links.loc[
-            H2_de
-        ].apply(
-            lambda row: discretized_capacity(
-                nom_opt=row["p_nom_opt"],
-                nom_max=row["p_nom_max"],
-                unit_size=unit_size_H2,
-                threshold=threshold_H2,
-                fractional_last_unit_size=True,
-            ),
-            axis=1,
-        )
-    # sort the links of h2_de by p_nom and only select those up to their sum of p_nom to be smaller than h2_de_vol
-    links_h2_de = n.links.loc[H2_de, ["p_nom"]].sort_values(ascending=False, by="p_nom")
-    links_h2_de["p_nom_cumsum"] = links_h2_de.cumsum()
-    links_h2_de.loc[links_h2_de.p_nom_cumsum > H2_de_vol, "p_nom"] = 0
-    post_de_h2 = links_h2_de[links_h2_de.p_nom > 0].drop(columns=["p_nom_cumsum"])
-    # check if reversed exist if yes add to post_de_h2 with same p_nom
-    for link in post_de_h2.index:
-        reversed_link = link.replace("-2045", "-reversed-2045")
-        if reversed_link in n.links.index:
-            post_de_h2.loc[reversed_link] = post_de_h2.loc[link]
-
-    logger.info("Selecting the endogenous H2 pipelines outside of DE to be discretized up to a volume of 2035's capacity")
-    H2_eu = n.links[
-        n.links.carrier.str.contains("H2 pipeline") &
-        ~(n.links.reversed) &
-        (n.links.build_year==2045) &
-        ~((n.links.bus0.str.startswith("DE")) | (n.links.bus1.str.startswith("DE")))
-    ].index
-    n.links.loc[H2_eu, "p_nom"] = n.links.loc[
-            H2_eu
-        ].apply(
-            lambda row: discretized_capacity(
-                nom_opt=row["p_nom_opt"],
-                nom_max=row["p_nom_max"],
-                unit_size=unit_size_H2,
-                threshold=threshold_H2,
-                fractional_last_unit_size=True,
-            ),
-            axis=1,
-        )
-    # sort the links of h2_eu by p_nom and only select those up to their sum of p_nom to be smaller than h2_eu_vol
-    links_h2_eu = n.links.loc[H2_eu, ["p_nom"]].sort_values(ascending=False, by="p_nom")
-    links_h2_eu["p_nom_cumsum"] = links_h2_eu.cumsum()
-    links_h2_eu.loc[links_h2_eu.p_nom_cumsum > H2_eu_vol, "p_nom"] = 0
-    post_eu_h2 = links_h2_eu[links_h2_eu.p_nom > 0].drop(columns=["p_nom_cumsum"])
-    # check if reversed exist if yes add to post_de_h2 with same p_nom
-    for link in post_eu_h2.index:
-        reversed_link = link.replace("-2045", "-reversed-2045")
-        if reversed_link in n.links.index:
-            post_eu_h2.loc[reversed_link] = post_eu_h2.loc[link]
-
-    unit_size_co2 = snakemake.params.solving["options"]["post_discretization"]["link_unit_size"]["CO2 pipeline"]
-    threshold_co2 = snakemake.params.solving["options"]["post_discretization"]["link_threshold"]["CO2 pipeline"]
-
-    logger.info("Selecting the endogenous CO2 pipelines outside of DE to be discretized up to a volume of 2035's capacity")
-    if run != "no_co2_network":
-        CO2_eu_vol = n.links[
-            n.links.carrier.str.contains("CO2 pipeline") & 
-            ~(n.links.build_year==2045) &
-            ~((n.links.bus0.str.startswith("DE") | (n.links.bus1.str.startswith("DE"))))
-        ].p_nom.sum()
-        CO2_de_vol = n.links[
-            n.links.carrier.str.contains("CO2 pipeline") & 
-            ~(n.links.build_year==2045) &
-            ((n.links.bus0.str.startswith("DE")) | (n.links.bus1.str.startswith("DE")))
-        ].p_nom.sum()
-    else:
-        CO2_link_path = snakemake.output.co2_links.replace("2045", "2035").replace("no_co2_network", "endo_H2")
-        CO2_links = pd.read_csv(CO2_link_path, index_col=0)
-        CO2_de_vol = CO2_links[
-            (CO2_links.bus0.str.startswith("DE") | CO2_links.bus1.str.startswith("DE"))
-        ].p_nom.sum()
-        CO2_eu_vol = CO2_links[
-            ~(CO2_links.reversed) &
-            ~((CO2_links.bus0.str.startswith("DE") | CO2_links.bus1.str.startswith("DE")))
-        ].p_nom.sum()
-
-    CO2_eu = n.links[
-        n.links.carrier.str.contains("CO2 pipeline") &
-        (n.links.build_year==2045) &
-        ~((n.links.bus0.str.startswith("DE")) | (n.links.bus1.str.startswith("DE")))
-    ].index
-    n.links.loc[CO2_eu, "p_nom"] = n.links.loc[
-            CO2_eu
-        ].apply(
-            lambda row: discretized_capacity(
-                nom_opt=row["p_nom_opt"],
-                nom_max=row["p_nom_max"],
-                unit_size=unit_size_co2,
-                threshold=threshold_co2,
-                fractional_last_unit_size=True,
-            ),
-            axis=1,
-        )
-    links_co2_eu = n.links.loc[CO2_eu, ["p_nom"]].sort_values(ascending=False, by="p_nom")
-    links_co2_eu["p_nom_cumsum"] = links_co2_eu.cumsum()
-    links_co2_eu.loc[links_co2_eu.p_nom_cumsum > CO2_eu_vol, "p_nom"] = 0
-    post_eu_co2 = links_co2_eu[links_co2_eu.p_nom > 0].drop(columns=["p_nom_cumsum"])
-
-
-    logger.info("Selecting the endogenous CO2 pipelines in DE to be discretized up to a volume of 2035's capacity")
-    CO2_de = n.links[
-        n.links.carrier.str.contains("CO2 pipeline") &
-        (n.links.build_year==2045) &
-        ((n.links.bus0.str.startswith("DE")) | (n.links.bus1.str.startswith("DE")))
-    ].index
-    n.links.loc[CO2_de, "p_nom"] = n.links.loc[
-            CO2_de
-        ].apply(
-            lambda row: discretized_capacity(
-                nom_opt=row["p_nom_opt"],
-                nom_max=row["p_nom_max"],
-                unit_size=unit_size_co2,
-                threshold=threshold_co2,
-                fractional_last_unit_size=True,
-            ),
-            axis=1,
-        )
-    # sort the links of co2_de by p_nom and only select those up to their sum of p_nom to be smaller than co2_de_vol
-    links_co2_de = n.links.loc[CO2_de, ["p_nom"]].sort_values(ascending=False, by="p_nom")
-    links_co2_de["p_nom_cumsum"] = links_co2_de.cumsum()
-    links_co2_de.loc[links_co2_de.p_nom_cumsum > CO2_de_vol, "p_nom"] = 0
-    
-    post_de_co2 = links_co2_de[links_co2_de.p_nom > 0].drop(columns=["p_nom_cumsum"])
-
-    logger.info("Reloading prenetwork and update CO2/H2 pipeline capacities with maximum volume of capacity built in 2035.")
-    del n
-    n = pypsa.Network(snakemake.input.network)
-
-    n.links.loc[post_eu_h2.index, "p_nom"] = post_eu_h2.p_nom
-    n.links.loc[post_de_h2.index, "p_nom"] = post_de_h2.p_nom
-    # disable expansion
-    n.links.loc[post_eu_h2.index, "p_nom_extendable"] = False
-    n.links.loc[post_de_h2.index, "p_nom_extendable"] = False
-    # drop the endogenous H2 pipelines that have been discretized to 0
-    to_drop = n.links[
-        n.links.carrier.str.contains("H2 pipeline") &
-        (n.links.build_year==2045) &
-        (n.links.p_nom_extendable)
-    ].index
-    n.links.drop(to_drop, inplace=True)
-
-    # update the p_nom of the endogenous CO2 pipelines with the post discretization values
-    n.links.loc[post_eu_co2.index, "p_nom"] = post_eu_co2.p_nom
-    n.links.loc[post_de_co2.index, "p_nom"] = post_de_co2.p_nom
-    # disable expansion
-    n.links.loc[post_eu_co2.index, "p_nom_extendable"] = False
-    n.links.loc[post_de_co2.index, "p_nom_extendable"] = False
-    # drop the endogenous CO2 pipelines that have been discretized to 0
-    to_drop = n.links[
-        n.links.carrier.str.contains("CO2 pipeline") &
-        (n.links.build_year==2045) &
-        (n.links.p_nom_extendable)
-    ].index
-    n.links.drop(to_drop, inplace=True)
-
-    return n
-
 
 
 if __name__ == "__main__":
@@ -1669,9 +1450,8 @@ if __name__ == "__main__":
             clusters="89",
             configfiles="config/config.de.yaml",
             sector_opts="none",
-            planning_horizons="2045",
-            # column="pcipmi_",
-            run="endo_H2",
+            planning_horizons="2025",
+            run="endogenous",
         )
     configure_logging(snakemake)
     set_scenario_config(snakemake)
@@ -1686,78 +1466,7 @@ if __name__ == "__main__":
     n = pypsa.Network(snakemake.input.network)
     planning_horizons = snakemake.wildcards.get("planning_horizons", None)
 
-    # Deactivate CO2 and H2 pipelines pcipmi for 2035 and 2045
-    if snakemake.wildcards.run in ["endo_H2", "onshore_sequestration_endo", "no_north_sea_endo"]:
-        logger.info("Dropping pcipmi projects for CO2 and H2")
-        pipes = n.links[n.links.carrier.str.contains("pcipmi")].index
-        n.links.drop(pipes, inplace=True)
-        stores = n.stores[(n.stores.carrier.str.contains("pcipmi")) |(n.stores.index.str.startswith("PCI-"))].index
-        n.stores.drop(stores, inplace=True)
-        buses = n.buses[(n.buses.carrier.str.contains("pcipmi")) | (n.buses.index.str.startswith("PCI-"))].index
-        n.buses.drop(buses, inplace=True)
-        # drop weird artefacts
-        to_drop = n.links[
-            ~(n.links.carrier.str.contains("pcipmi")) &
-            (n.links.index.str.startswith("PCI-PMI"))].index
-        n.links.drop(to_drop, inplace=True)
-    
-    if snakemake.wildcards.run == "no_north_sea_endo" and planning_horizons=="2035":
-        # drop links and sequestration possibility to North Sea
-        logger.info("Dropping possibility to sequester in German North Sea")
-        n.links.drop(["DE0 6 offshore 0 co2 stored pipeline-2035",
-                      "DE0 8 offshore 0 co2 stored pipeline-2035",
-                      "DE0 6 offshore 0",
-                      "DE0 8 offshore 0"], inplace=True)
-        n.buses.drop(["DE0 6 offshore 0 co2 stored",
-                      "DE0 6 offshore 0 co2 sequestered",
-                      "DE0 8 offshore 0 co2 stored",
-                      "DE0 8 offshore 0 co2 sequestered"], inplace=True)
-        n.stores.drop(["DE0 6 offshore 0 co2 sequestered",
-                       "DE0 8 offshore 0 co2 sequestered"], inplace=True)
-
-    # Deactivate CO2 pipeline endogenous for no_co2_network scenario 2035
-    if snakemake.wildcards.run == "no_co2_network" and planning_horizons == "2035":
-        logger.info("Deactivating endogenous CO2 pipeline expansion and pcipmi pipelines in 2035")
-        co2_pipes = n.links[(n.links.carrier.str.contains("CO2 pipeline")) & ~(n.links.index.str.contains("offshore"))].index
-        n.links.loc[co2_pipes, "active"] = False
-
-    # Deactivate H2 pipeline endogenous for frozen_H2_28 scenario 2035
-    if snakemake.wildcards.run == "frozen_H2_28" and planning_horizons == "2035":
-        logger.info("Deactivating endogenous hydrogen pipeline expansion in 2035")
-        h2_pipes = n.links[(n.links.carrier.isin(["H2 pipeline retrofitted", "H2 pipeline"])) & (n.links.p_nom_extendable)].index
-        n.links.loc[h2_pipes, "active"] = False
-
-    if snakemake.wildcards.run in ["pcipmi_H2_+", "onshore_sequestration", "seq_50"] and planning_horizons == "2035":
-        carriers = ["H2 pipeline pcipmi", "CO2 pipeline pcipmi"]
-
-        for carrier in carriers:
-            # Drop existing links that have the same bus0 and bus1 as the PCI/PMI projects
-            endo_carrier = carrier.replace(" pcipmi", "")
-            existing_links = n.links.query("carrier == @endo_carrier").copy()
-            existing_links["bus_set"] = existing_links.apply(
-                lambda row: frozenset([row.bus0, row.bus1]), axis=1
-            )
-            projects = n.links.query("carrier == @carrier").copy()
-            pcipmi_links_set = projects.apply(
-                lambda row: frozenset([row.bus0, row.bus1]), axis=1
-            )
-            duplicates = existing_links.loc[existing_links.bus_set.isin(pcipmi_links_set)].index
-
-            logger.info(
-                f"- replacing {len(duplicates)} existing {carrier}s with PCI/PMI projects of the same bus0 and bus1"
-            )
-            n.links = n.links.drop(duplicates)    
-
-    if snakemake.params.solving["sweep"]["enable"] and snakemake.wildcards.planning_horizons=="2035":
-        # deactivate post discretization
-        logger.info("Disabling post_discretizaion")
-        snakemake.params.solving["options"]["skip_iterations"] = True
-        snakemake.params.solving["options"]["post_discretization"]["enable"] = False
-    if planning_horizons == "2045":
-        logger.info("Disabling post_discretizaion for 2045 to post discretize with limited expansion of H2 and CO2 pipelines.")
-        snakemake.params.solving["options"]["skip_iterations"] = True
-        snakemake.params.solving["options"]["post_discretization"]["enable"] = False
-
+    # Prepare network (settings before solving)
     prepare_network(
         n,
         solve_opts=snakemake.params.solving["options"],
@@ -1817,6 +1526,7 @@ if __name__ == "__main__":
                 params=snakemake.params,
                 model_kwargs=model_kwargs,
                 solve_kwargs=solve_kwargs,
+                snakemake=snakemake,
                 planning_horizons=planning_horizons,
             )
 
@@ -1837,10 +1547,10 @@ if __name__ == "__main__":
             n.config = snakemake.config
             n.params = snakemake.params
             all_kwargs["extra_functionality"] = partial(
-                extra_functionality, planning_horizons=planning_horizons
+                extra_functionality, planning_horizons=planning_horizons, snakemake=snakemake
             )
             status, condition = n.optimize.optimize_transmission_expansion_iteratively(
-                **all_kwargs
+                **all_kwargs,
             )
 
     logger.info(f"Maximum memory usage: {mem.mem_usage}")
@@ -1866,42 +1576,6 @@ if __name__ == "__main__":
         raise RuntimeError(
             "Solving status 'warning'. Results may not be reliable. Aborting."
         )
-        solve_network(
-            n,
-            config=snakemake.config,
-            params=snakemake.params,
-            solving=snakemake.params.solving,
-            planning_horizons=planning_horizons,
-            rule_name=snakemake.rule,
-            log_fn=snakemake.log.solver,
-            snakemake=snakemake,
-        )
-
-    logger.info(f"Maximum memory usage: {mem.mem_usage}")
-
-    if planning_horizons == "2045":
-        logger.info("Manual post-discretization")
-        n = manual_post_discretization(n, snakemake.wildcards.run)
-        
-        prepare_network(
-            n,
-            solve_opts=snakemake.params.solving["options"],
-            foresight=snakemake.params.foresight,
-            planning_horizons=planning_horizons,
-            co2_sequestration_potential=snakemake.params["co2_sequestration_potential"],
-            limit_max_growth=snakemake.params.get("sector", {}).get("limit_max_growth"),
-        )
-        logging_frequency = snakemake.config.get("solving", {}).get(
-            "mem_logging_frequency", 30
-        )
-        snakemake.params.solving["options"].update({"skip_iterations": True})
-        with memory_logger(
-            filename=getattr(snakemake.log, "memory", None), interval=logging_frequency
-        ) as mem:
-            status, condition = n.optimize.solve_model(**solve_kwargs)
-
-
-        logger.info(f"Maximum memory usage: {mem.mem_usage}")
 
     n.meta = dict(snakemake.config, **dict(wildcards=dict(snakemake.wildcards)))
     n.export_to_netcdf(snakemake.output.network)
@@ -1917,12 +1591,3 @@ if __name__ == "__main__":
             allow_unicode=True,
             sort_keys=False,
         )
-
-    h2_links = n.links[n.links.carrier.str.contains("H2 pipeline")]
-    h2_links.to_csv(snakemake.output.h2_links)
-    co2_links = n.links[n.links.carrier.isin(["co2 sequestered", "CO2 pipeline"])]
-    co2_links.to_csv(snakemake.output.co2_links)
-    buses = n.buses[n.buses.carrier.isin(["co2 stored", "co2 sequestered"])]
-    buses.to_csv(snakemake.output.co2_buses)
-    stores = n.stores[n.stores.carrier.isin(["co2 stored", "co2 sequestered"])]
-    stores.to_csv(snakemake.output.co2_stores)

@@ -1421,127 +1421,6 @@ def limit_cross_border_flows_ac(n, s_max_pu):
     n.lines.loc[cross_border_lines, "s_max_pu"] = s_max_pu
 
 
-def modify_industry_demand(
-    n,
-    year,
-    industry_energy_demand_file,
-    industry_production_file,
-    sector_ratios_file,
-    scale_non_energy=False,
-):
-    logger.info("Modifying industry demand in Germany.")
-
-    industry_production = pd.read_csv(
-        industry_production_file,
-        index_col="kton/a",
-    ).rename_axis("country")
-
-    sector_ratios = pd.read_csv(
-        sector_ratios_file,
-        header=[0, 1],
-        index_col=0,
-    ).rename_axis("carrier")
-
-    new_demand = pd.read_csv(
-        industry_energy_demand_file,
-        index_col=0,
-    )[str(year)].mul(1e6)
-
-    subcategories = ["HVC", "Methanol", "Chlorine"]
-    if not snakemake.params.ammonia:
-        logger.info("Ammonia not resolved. Adding to scale-down")
-        subcategories.append("Ammonia")
-    carrier = ["hydrogen", "methane", "naphtha"]
-
-    ip = industry_production.loc["DE", subcategories]  # kt/a
-    sr = sector_ratios["DE"].loc[carrier, subcategories]  # MWh/tMaterial
-    _non_energy = sr.multiply(ip).sum(axis=1) * 1e3
-
-    non_energy = pd.Series(
-        {
-            "industry electricity": 0.0,
-            "low-temperature heat for industry": 0.0,
-            "solid biomass for industry": 0.0,
-            "H2 for industry": _non_energy["hydrogen"],
-            "coal for industry": 0.0,
-            "gas for industry": _non_energy["methane"],
-            "naphtha for industry": _non_energy["naphtha"],
-        }
-    )
-
-    _industry_loads = [
-        "solid biomass for industry",
-        "gas for industry",
-        "H2 for industry",
-        "industry methanol",
-        "naphtha for industry",
-        "low-temperature heat for industry",
-        "industry electricity",
-        "coal for industry",
-    ]
-    industry_loads = n.loads.query(
-        f"carrier in {_industry_loads} and bus.str.startswith('DE')"
-    )
-
-    if scale_non_energy:
-        new_demand_without_non_energy = new_demand.sum()
-        pypsa_industry_without_non_energy = (
-            industry_loads.p_set.sum() * 8760 - non_energy.sum()
-        )
-        non_energy_scaling_factor = (
-            new_demand_without_non_energy / pypsa_industry_without_non_energy
-        )
-        logger.info(
-            f"Scaling non-energy use by {non_energy_scaling_factor:.2f} to match UBA data."
-        )
-        non_energy_corrected = non_energy * non_energy_scaling_factor
-        if snakemake.params.ammonia:
-            logger.info("Scaling Ammonia Load using non-energy scaling factor.")
-            nh3_loads = n.loads[(n.loads.carrier=="NH3") & (n.loads.index.str[:2]=="DE")].index
-            n.loads.loc[nh3_loads, "p_set"] *= non_energy_scaling_factor
-    else:
-        non_energy_corrected = non_energy
-
-    for carrier in [
-        "industry electricity",
-        "H2 for industry",
-        "solid biomass for industry",
-        "low-temperature heat for industry",
-    ]:
-        loads_i = n.loads.query(
-            f"carrier == '{carrier}' and bus.str.startswith('DE')"
-        ).index
-        logger.info(
-            f"Total load of {carrier} in DE before scaling: {n.loads.loc[loads_i, 'p_set'].sum()/1e6 * 8760:.2f} TWh/a"
-        )
-        total_load = industry_loads.p_set.loc[loads_i].sum() * 8760
-        scaling_factor = (
-            new_demand[carrier] + non_energy_corrected[carrier]
-        ) / total_load
-        n.loads.loc[loads_i, "p_set"] *= scaling_factor
-        logger.info(
-            f"Total load of {carrier} in DE after scaling: {n.loads.loc[loads_i, 'p_set'].sum()/1e6 * 8760:.2f} TWh/a"
-        )
-
-    # Fossil fuels are aggregated in UBA MWMS but have to be scaled separately
-    fossil_loads = industry_loads.query("carrier.str.contains('gas|coal|naphtha')")
-    fossil_totals = (
-        fossil_loads[["p_set", "carrier"]].groupby("carrier").p_set.sum() * 8760
-    )
-    fossil_energy = fossil_totals - non_energy[fossil_totals.index]
-    fossil_energy_corrected = fossil_energy * new_demand["fossil"] / fossil_energy.sum()
-    fossil_totals_corrected = (
-        fossil_energy_corrected + non_energy_corrected[fossil_totals.index]
-    )
-    for carrier in fossil_totals.index:
-        loads_i = fossil_loads.query(
-            f"carrier == '{carrier}' and bus.str.startswith('DE')"
-        ).index
-        n.loads.loc[loads_i, "p_set"] *= (
-            fossil_totals_corrected[carrier] / fossil_totals[carrier]
-        )
-
-
 def allow_cc_retrofit(n, costs):
     carriers = [
         'OCGT',
@@ -1784,7 +1663,7 @@ def consolidate_shipping_demand(n):
         p_nom=3e3,
         )
 
-def northern_lights(n):
+def remove_german_northsea(n):
     logger.info("Removing sequestration potential in North Sea for Germany.")
     # get stores buses and links
     idx = n.stores[(n.stores.bus.str.startswith("DE")) & (n.stores.carrier=="co2 sequestered")].index
@@ -1795,12 +1674,12 @@ def northern_lights(n):
     n.buses.drop(idx, inplace=True)
 
     buses = idx.str.replace(" offshore 0 co2 sequestered", "")
-    names = idx.str.replace(" offshore 0 co2 sequestered", "NorthernLights Ship")
+    names = idx.str.replace(" offshore 0 co2 sequestered", " NorthernLights Ship")
     logger.info("Adding possibility to ship co2 to Northern Lights.")
     n.add("Link",
           names,
           bus0=idx_stored,
-          bus1=["NO1 0 offshore 1 co2 stored"],
+          bus1=["NO1 0 offshore 0 co2 stored"],
           marginal_cost=50, # €/t
           capital_cost=0.1,
           carrier="co2 sequestered",
@@ -1815,12 +1694,12 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "modify_prenetwork",
             simpl="",
-            clusters=49,
+            clusters=89,
             opts="",
             ll="vopt",
             sector_opts="none",
             planning_horizons="2035",
-            run="pcipmi_H2_+",
+            run="endogenous",
         )
 
     configure_logging(snakemake)
@@ -1907,16 +1786,6 @@ if __name__ == "__main__":
 
     scale_capacity(n, snakemake.params.scale_capacity)
 
-    if snakemake.params.uba_for_industry and 2025 <= current_year < 2040:
-        modify_industry_demand(
-            n=n,
-            year=current_year,
-            industry_energy_demand_file=snakemake.input.new_industrial_energy_demand,
-            industry_production_file=snakemake.input.industrial_production_per_country_tomorrow,
-            sector_ratios_file=snakemake.input.industry_sector_ratios,
-            scale_non_energy=snakemake.params.scale_industry_non_energy,
-        )
-
     if current_year > 2025:
         allow_cc_retrofit(n, costs)
 
@@ -1925,8 +1794,7 @@ if __name__ == "__main__":
     else:
         consolidate_shipping_demand(n)
 
-    if current_year == 2035 and snakemake.wildcards.run=="northern_lights":
-        northern_lights(n)
+    remove_german_northsea(n)
 
     sanitize_custom_columns(n)
 

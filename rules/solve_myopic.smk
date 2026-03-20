@@ -163,14 +163,6 @@ rule solve_sector_network_myopic:
             if config["solving"]["options"]["store_model"]
             else []
         ),
-        h2_links=RESULTS
-        + "topology/H2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
-        co2_links=RESULTS
-        + "topology/CO2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
-        co2_buses=RESULTS
-        + "topology/CO2_buses_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
-        co2_stores=RESULTS
-        + "topology/CO2_stores_base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
     shadow:
         shadow_config
     log:

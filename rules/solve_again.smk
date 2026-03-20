@@ -11,22 +11,12 @@ rule solve_operations_sector_network:
         custom_extra_functionality=input_custom_extra_functionality,
         solve_operations=config_provider("solve_operations"),
         energy_year=config_provider("energy", "energy_totals_year"),
-        foresight=config_provider("foresight"),
     input:
         network=RESULTS + "networks/base_s_{clusters}_{opts}_{sector_opts}_2035.nc",
         co2_totals_name=resources("co2_totals.csv"),
         energy_totals=resources("energy_totals.csv"),
-        h2_links=RESULTS
-        + "topology/H2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
-        co2_links=RESULTS
-        + "topology/CO2_pipelines_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
-        co2_buses=RESULTS
-        + "topology/CO2_buses_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
-        co2_stores=RESULTS
-        + "topology/CO2_stores_base_s_{clusters}_{opts}_{sector_opts}_2035.csv",
-        co2_sequestration_potential=resources("co2_sequestration_potential_base_s_{clusters}.geojson"),
     output:
-        network=RESULTS + "networks/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035.nc",
+        network=RESULTS + "networks/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035.nc",
     log:
         solver=RESULTS
         + "logs/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035_solver.log",
@@ -55,18 +45,8 @@ rule solve_operations_sector_networks:
     input:
         expand(
             RESULTS 
-            + "networks/operations/{column}/cost_de_{clusters}_{opts}_{sector_opts}_2035.csv",
+            + "networks/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035.nc",
             **config["scenario"],
             run=config["run"]["name"],
             column=config["solve_operations"]["columns"]
-        ),
-
-rule get_de_costs:
-    input:
-        network=RESULTS + "networks/operations/{column}/base_s_ops_{clusters}_{opts}_{sector_opts}_2035.nc"
-    output:
-        cost=RESULTS + "networks/operations/{column}/cost_de_{clusters}_{opts}_{sector_opts}_2035.csv"
-    log:
-        RESULTS + "logs/cost_de_{column}_{clusters}_{opts}_{sector_opts}_2035.log"
-    script:
-        "../scripts/pypsa-de/get_de_costs.py"
+        )

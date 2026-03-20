@@ -1360,34 +1360,34 @@ def add_existing_steel_plants(
     bof = bof[bof.bus.isin(steel_buses)]
 
     # add direct reduction with natural gas
-    gas_input = costs.at["natural gas direct iron reduction furnace", "gas-input"]
+    electricity_input = costs.at["hydrogen direct iron reduction furnace", "electricity-input"]
     marginal_cost = (
         costs.at["iron ore DRI-ready", "commodity"]
-        * costs.at["natural gas direct iron reduction furnace", "ore-input"]
-        / gas_input
+        * costs.at["hydrogen direct iron reduction furnace", "ore-input"]
+        / electricity_input
     )
 
-    logger.info(f"Adding {len(drg)} gas DRI plant.")
+    logger.info(f"Adding {len(drg)} DRI plant.")
 
     n.add(
         "Link",
         drg.index,
-        bus0=[bus + " gas" for bus in drg.bus]
-        if snakemake.params.sector["gas_network"]
-        else "EU gas",
-        bus1=[bus + " hbi" for bus in drg.bus] if not snakemake.params.sector["industry_relocation"] else "EU hbi",
-        bus2=[bus + " gas DRI emission" for bus in drg.bus],
-        p_nom=drg["Production in tons (calibrated)"]
-        .mul(gas_input)
-        .div(8760)
-        .values,
-        p_nom_extendable=False,
-        carrier="gas DRI",
-        efficiency=1/gas_input,
-        efficiency2=costs.at["gas", "CO2 intensity"],
-        capital_cost=costs.at["natural gas direct iron reduction furnace", "capital_cost"]
-            / gas_input,
+        carrier="DRI",
+        capital_cost=costs.at[
+            "hydrogen direct iron reduction furnace", "capital_cost"
+        ]
+        / electricity_input,
         marginal_cost=marginal_cost,
+        p_nom=drg["Production in tons (calibrated)"]
+            .mul(electricity_input)
+            .div(8760)
+            .values,
+        p_nom_extendable=False,
+        bus0=[bus for bus in drg.bus],
+        bus1=[bus + " hbi" for bus in drg.bus] if not snakemake.params.sector["industry_relocation"] else "EU hbi",
+        bus2=[bus + " DRI reduction" for bus in drg.bus],
+        efficiency=1 / electricity_input,
+        efficiency2=-1 / electricity_input,
         build_year=drg["Year of last modernisation"],
         lifetime=drg["Lifetime"],
     )
@@ -1524,41 +1524,37 @@ def add_existing_meoh_plants(n):
 
     fh_meoh.index = (
         fh_meoh["bus"]
-        + " grey methanol-"
+        + " methanolisation-"
         + fh_meoh["grouping_year"].astype(str)
     )
 
-    # grey methanol
-    costs.at["grey methanol synthesis", "efficiency"] = 1/costs.at["grey methanol synthesis", "gas-input"]
-    capital_cost = (
-        costs.at["SMR", "capital_cost"]
-        + costs.at["methanolisation", "capital_cost"]
-        * costs.at["grey methanol synthesis", "efficiency"]
-    )
-    co2_emissions = (
-        costs.at["gas", "CO2 intensity"]
-        - costs.at["grey methanol synthesis", "efficiency"]
-        * costs.at["methanol", "CO2 intensity"]
-    )
     n.add(
         "Link",
         fh_meoh.index,
-        bus0=[bus + " gas" for bus in fh_meoh.bus]
-        if snakemake.params.sector["gas_network"]
-        else "EU gas",
+        bus0=[bus + " H2" for bus in fh_meoh.bus],
         bus1="EU methanol",
-        bus2="co2 atmosphere",
-        p_nom_extendable=False,
+        bus2=[bus for bus in fh_meoh.bus],
+        bus3=[bus + " co2 stored" for bus in fh_meoh.bus],
+        carrier="methanolisation",
         p_nom=fh_meoh["Production in tons (calibrated)"]
         .mul(snakemake.params.MWh_MeOH_per_tMeOH)
-        .div(costs.at["grey methanol synthesis", "efficiency"])
+        .div(costs.at["methanolisation", "hydrogen-input"])
         .div(8760),
-        carrier="grey methanol",
-        efficiency=costs.at["grey methanol synthesis", "efficiency"],
-        efficiency2=co2_emissions,
-        capital_cost=capital_cost,
+        p_nom_extendable=False,
+        p_min_pu=options["min_part_load_methanolisation"],
+        capital_cost=costs.at["methanolisation", "capital_cost"]
+        / costs.at["methanolisation", "hydrogen-input"],  # EUR/MW_H2/a
+        onight_cost=costs.at["methanolisation", "investment"]
+        / costs.at["methanolisation", "hydrogen-input"],
+        marginal_cost=costs.at["methanolisation", "VOM"]
+        / costs.at["methanolisation", "hydrogen-input"],
         build_year=fh_meoh.grouping_year,
-        lifetime=costs.at["SMR", "lifetime"],
+        lifetime=costs.at["methanolisation", "lifetime"],
+        efficiency=1 / costs.at["methanolisation", "hydrogen-input"],
+        efficiency2=-costs.at["methanolisation", "electricity-input"]
+        / costs.at["methanolisation", "hydrogen-input"],
+        efficiency3=-costs.at["methanolisation", "carbondioxide-input"]
+        / costs.at["methanolisation", "hydrogen-input"],
     )
 
 
@@ -1672,12 +1668,12 @@ if __name__ == "__main__":
 
         snakemake = mock_snakemake(
             "add_existing_baseyear",
-            clusters="49",
+            clusters="89",
             ll="vopt",
             opts="",
             sector_opts="none",
-            planning_horizons="2035",
-            run="frozen_H2_27",
+            planning_horizons="2025",
+            run="pcipmi",
         )
 
     configure_logging(snakemake)  # pylint: disable=E0606
@@ -1694,7 +1690,7 @@ if __name__ == "__main__":
     n = pypsa.Network(snakemake.input.network)
 
     # define spatial resolution of carriers
-    spatial = define_spatial(n.buses[n.buses.carrier == "AC"].index, options)
+    spatial = define_spatial(n.buses[(n.buses.carrier == "AC") & ~(n.buses.index.str.contains("PCI-PMI"))].index, options)
     add_build_year_to_new_assets(n, baseyear)
 
     costs = load_costs(snakemake.input.costs)
@@ -1759,9 +1755,9 @@ if __name__ == "__main__":
         add_existing_steel_plants(n)
     if "cement" in snakemake.params.sector["endogenous_sectors"]:
         add_existing_cement_plants(n)
-    if ("ammonia" in snakemake.params.sector["endogenous_sectors"]) and (snakemake.params.sector["ammonia"]):
+    if snakemake.params.sector["ammonia"]:
         add_existing_ammonia_plants(n)
-    if "methanol" in snakemake.params.sector["endogenous_sectors"]:
+    if snakemake.params.sector["industry"]:
         add_existing_meoh_plants(n)
 
     n.meta = dict(snakemake.config, **dict(wildcards=dict(snakemake.wildcards)))
