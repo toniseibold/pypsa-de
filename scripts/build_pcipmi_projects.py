@@ -560,15 +560,9 @@ def specify_flow_direction(links_co2_pipeline):
         "PCI-13.8-02",
         "PCI-13.7-03",
         "PCI-13.4-01",
+        "PCI-13.4-04",
         ]
     links_co2_pipeline.loc[to_switch, ["bus0", "bus1"]] = links_co2_pipeline.loc[to_switch, ["bus1", "bus0"]].values
-
-    ambigous = [
-        "PCI-13.7-01",
-        "PCI-13.4-04",
-        "PCI-13.12",
-    ]
-    links_co2_pipeline.loc[ambigous, "p_min_pu"] = -1
     
     return links_co2_pipeline
 
