@@ -17,6 +17,8 @@ rule extract_data:
         infrastructure=RESULTS + "infrastructure_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
         fh_co2_stored=RESULTS + "fraunhofer_co2_stored_balance_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
         fh_co2_flow=RESULTS + "fraunhofer_co2_flow_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
+        paper_metrics=RESULTS
+        + "paper_metrics_{clusters}_{opts}_{sector_opts}_{planning_horizons}.csv",
     log:
         RESULTS + "logs/extract_data_{clusters}_{opts}_{sector_opts}_{planning_horizons}.log",
     benchmark:
@@ -87,7 +89,7 @@ rule plot_maps:
 rule plot_report:
     input:
         expand(
-            RESULTS + "logs/plot_balance_2035.log",
+            RESULTS + "paper_metrics_89__none_2025.csv",
             run=config_provider("run", "name"),
         ),
         # expand(

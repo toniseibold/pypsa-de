@@ -40,7 +40,7 @@ def isi_data(
     df_co2_stored.loc["process emissions CC"] = df_co2_stored.loc["process emissions CC"].mul(partial.loc["process emissions"])
     
     # Taking care of sequestration not transport:
-    if snakemake.params.carrier_networks["CO2"]["enable"]:
+    if snakemake.params.carrier_networks["CO2"]["include"]["pcipmi"]:
         logger.info("Hacking co2 trade...")
         index = ['PCI-13.8-01', 'PCI-13.8-03', 'PCI-13.4-05', 'PCI-13.5-02',
         'PCI-13.1+1-02', 'PCI-13.13']
@@ -59,7 +59,8 @@ def isi_data(
     vol = n.links_t.p0[index].mul(n.snapshot_weightings.generators, axis=0).sum()
     data = pd.DataFrame([n.links.loc[index, "bus0"].values, n.links.loc[index, "bus1"].values, vol.values], columns=index, index=["bus0", "bus1", "volume t/yr"]).T
     # don't show the sequestration pipelines
-    data = data[~data.bus1.str.startswith("PCI")]
+    if not data.empty:
+        data = data[~data.bus1.str.startswith("PCI")]
     
     logger.info("Saving co2 stored flows for Fraunhofer ISI")
     data.to_csv(snakemake.output.fh_co2_flow)
@@ -111,7 +112,7 @@ def get_co2_stored(
     CO2_DE["trade"] = n.links_t.p0[incoming].mul(n.snapshot_weightings.generators, axis=0).sum().sum() / 1e6 - n.links_t.p0[outgoing].mul(n.snapshot_weightings.generators, axis=0).sum().sum() / 1e6
     
     # drop "CO2 pipeline pcipmi"
-    if snakemake.params.carrier_networks["CO2"]["enable"]:
+    if snakemake.params.carrier_networks["CO2"]["include"]["pcipmi"]:
         CO2_DE.drop("CO2 pipeline pcipmi", inplace=True)
 
     CO2_EU = (
@@ -240,6 +241,85 @@ def get_infrastructure(
     data.to_csv(snakemake.output.infrastructure)
 
 
+def get_misc(n):
+    # get totex
+    totex = n.statistics.capex().sum() + n.statistics.opex().sum()
+    # get TWkm H2
+    h2_endo = n.links[(n.links.carrier == "H2 pipeline") & (n.links.active) & ((n.links.bus0.str[:2] == "DE") | (n.links.bus1.str[:2] == "DE"))].index
+    if not h2_endo.empty:
+        h2_cap_endo = n.links.loc[h2_endo, "p_nom_opt"].mul(n.links.loc[h2_endo, "length"]).sum()
+    # get Mt/h km CO2
+    co2_endo = n.links[(n.links.carrier == "CO2 pipeline") & (n.links.active) & ~(n.links.index.str.contains("offshore")) & ((n.links.bus0.str[:2] == "DE") | (n.links.bus1.str[:2] == "DE"))].index
+    if not co2_endo.empty:
+        co2_cap_endo = n.links.loc[co2_endo, "p_nom_opt"].mul(n.links.loc[co2_endo, "length"]).sum()
+    # get pci/pmi TWkm H2
+    h2_pci = n.links[(n.links.carrier == "H2 pipeline pcipmi") & (n.links.active) & ((n.links.bus0.str[:2] == "DE") | (n.links.bus1.str[:2] == "DE"))].index
+    if not h2_pci.empty:
+        h2_cap_pci = n.links.loc[h2_pci, "p_nom_opt"].mul(n.links.loc[h2_pci, "length"]).sum()
+    # get pci/pmi Mt/h km CO2
+    co2_pci = n.links[(n.links.carrier == "CO2 pipeline pcipmi") & (n.links.active) & ((n.links.bus0.str[:2] == "DE") | (n.links.bus1.str[:2] == "DE"))].index
+    if not co2_pci.empty:
+        co2_cap_pci = n.links.loc[co2_pci, "p_nom_opt"].mul(n.links.loc[co2_pci, "length"]).sum()
+
+    sn = n.snapshot_weightings.generators
+    # german totex
+    capex = 0
+    for component in n.components:
+        if component.name in ["Bus", "Carrier", "TransformerType", "GlobalConstraint", "SubNetwork", "LineType", "Load"]:
+            continue
+        if component.name == "Store":
+            attr = "e"
+        elif component.name == "Line":
+            attr = "s"
+        else:
+            attr = "p"
+        # german ones
+        valid = component.static[component.static.index.str[:2] == "DE"].index
+        capex += component.static.loc[valid, f"{attr}_nom_opt"].mul(component.static.loc[valid, "capital_cost"]).sum()
+
+    opex = n.statistics.opex(groupby=["country"]).xs("DE", level="country").sum()
+    gas = -n.links_t.p1["DE gas compressing"].mul(sn, axis=0).mul(22.4).sum()
+    oil = -n.links_t.p1["DE oil refining"].mul(sn, axis=0).mul(38.5629).sum()
+    opex = opex + gas + oil
+
+    # value of import
+    imp = 0
+    exp = 0
+    # all imports
+    import_l = n.links[~(n.links.bus0.str.startswith("DE")) & (n.links.bus1.str.startswith("DE"))].index
+    for index in import_l:
+        flow = n.links_t.p0[index]
+        bus = n.links.loc[index, "bus1"]
+        price = n.buses_t.marginal_price[bus]
+        imp += flow.mul(sn, axis=0).mul(price, axis=0).sum()
+    # all exports
+    export_l = n.links[(n.links.bus0.str.startswith("DE")) & ~(n.links.bus1.str.startswith("DE"))].index
+    for index in export_l:
+        flow = n.links_t.p0[index]
+        bus = n.links.loc[index, "bus0"]
+        price = n.buses_t.marginal_price[bus]
+        exp += flow.mul(sn, axis=0).mul(price, axis=0).sum()
+    
+    trade = imp + exp
+
+    revenue = n.statistics.revenue(groupby=["carrier", "bus"]).loc["Load", :, :]
+    revenue_de = revenue[revenue.index.get_level_values("bus").str.startswith("DE")]
+    revenue_de = revenue_de.sum()
+
+    summary = pd.Series(
+        {
+            "totex": totex,
+            "ger_totex": (opex + capex),
+            "trade": trade,
+            "revenue": revenue_de,
+            "h2_endo_TWkm": h2_cap_endo if not h2_endo.empty else 0,
+            "co2_endo_Mt_h_km": co2_cap_endo if not co2_endo.empty else 0,
+            "h2_pci_TWkm": h2_cap_pci if not h2_pci.empty else 0,
+            "co2_pci_Mt_h_km": co2_cap_pci if not co2_pci.empty else 0,
+        }
+    )
+    summary.to_csv(snakemake.output.paper_metrics)
+
 
 if __name__ == "__main__":
     if "snakemake" not in globals():
@@ -247,23 +327,29 @@ if __name__ == "__main__":
             "extract_data",
             simpl="",
             clusters=89,
-            planning_horizons=2035,
+            planning_horizons=2025,
             opts="",
             ll="vopt",
             sector_opts="none",
-            run="endo_H2",
+            run="no_co2_network",
         )
 
     configure_logging(snakemake)
 
     n = pypsa.Network(snakemake.input.network)
+    if snakemake.wildcards.planning_horizons != "2025":
+        isi_data(n)
 
-    isi_data(n)
+        get_co2_stored(n)
 
-    get_co2_stored(n)
+        get_h2(n)
 
-    get_h2(n)
+        get_infrastructure(n)
+    else:
+        data = pd.DataFrame()
+        for output in snakemake.output[:-1]:
+            data.to_csv(output)
 
-    get_infrastructure(n)
+    get_misc(n)
 
     del n
