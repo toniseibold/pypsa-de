@@ -95,6 +95,7 @@ def define_spatial(nodes, options):
     spatial.co2 = SimpleNamespace()
 
     if options["co2_spatial"]:
+        spatial.co2.compressed = nodes + " co2 stored compressed"
         spatial.co2.nodes = nodes + " co2 stored"
         spatial.co2.locations = nodes
         spatial.co2.vents = nodes + " co2 vent"
@@ -936,6 +937,44 @@ def add_co2_tracking(
         unit="t_co2",
     )
 
+    n.add("Carrier", "co2 compressed")
+    n.add(
+        "Bus",
+        spatial.co2.compressed,
+        x=n.buses.loc[spatial.co2.locations, "x"].values,
+        y=n.buses.loc[spatial.co2.locations, "y"].values,
+        location=spatial.co2.locations,
+        carrier="co2 compressed",
+        unit="t_co2",
+    )
+    n.add("Carrier", "co2 compression")
+    n.add(
+        "Link",
+        spatial.co2.compressed,
+        bus0=spatial.co2.nodes,
+        bus1=spatial.co2.compressed,
+        bus2=spatial.nodes,
+        capital_cost=costs.at["CO2 liquefaction", "capital_cost"],
+        efficiency=1.0,
+        efficiency2=-0.16515,
+        p_nom=0,
+        p_nom_extendable=True,
+        carrier="co2 compression",
+        unit="MWh",
+    )
+    n.add("Carrier", "co2 expansion")
+    n.add(
+        "Link",
+        spatial.co2.nodes,
+        suffix=" expansion",
+        bus0=spatial.co2.compressed,
+        bus1=spatial.co2.nodes,
+        efficiency=1.0,
+        p_nom=1e7,
+        carrier="co2 expansion",
+        unit="t_co2",
+    )
+
     n.add(
         "Store",
         spatial.co2.nodes,
@@ -972,7 +1011,7 @@ def add_co2_tracking(
             .clip(upper=upper_limit*1e6)
         )  # tpa
         sequestration_potential.index = sequestration_potential.index + " co2 sequestered"
-       
+        
         # Add store buses
         n.add(
             "Bus",
@@ -983,7 +1022,7 @@ def add_co2_tracking(
             unit="t_co2"
         )
 
-        sequestration_potential.index = sequestration_potential.index.str.replace("sequestered", "stored")
+        sequestration_potential.index = sequestration_potential.index.str.replace("sequestered", "stored compressed")
 
         # Add sequestration buses
         n.add(
@@ -999,7 +1038,7 @@ def add_co2_tracking(
         n.add(
             "Link",
             offshore_index,
-            bus0=offshore_index + " co2 stored",
+            bus0=offshore_index + " co2 stored compressed",
             bus1=offshore_index + " co2 sequestered",
             marginal_cost=options["co2_sequestration_cost"],
             capital_cost=0.1,
@@ -1010,7 +1049,7 @@ def add_co2_tracking(
 
         # Add links between sequestration sites and closest onshore bus
         sequestration_links = pd.DataFrame(columns=["bus0", "bus1", "length"])
-        sequestration_links["bus0"] = sequestration_potential["bus_onshore"] + " co2 stored"
+        sequestration_links["bus0"] = sequestration_potential["bus_onshore"] + " co2 stored compressed"
         sequestration_links["bus1"] = sequestration_potential.index
         # TONITODO: think about this
         length_factor = 1.25
@@ -1030,7 +1069,7 @@ def add_co2_tracking(
             lifetime=costs.at["CO2 pipeline", "lifetime"],
         )
 
-        sequestration_potential.index = sequestration_potential.index.str.replace("stored", "sequestered")
+        sequestration_potential.index = sequestration_potential.index.str.replace("stored compressed", "sequestered")
 
         # Note moved capital costs to OPEX in links connecting CO2 stores to sequestration sites
         n.add(
@@ -1136,25 +1175,21 @@ def add_co2_network(n, costs, co2_network_cost_factor=1.0):
         (1 - co2_links.underwater_fraction)
         * costs.at["CO2 pipeline", "capital_cost"]
         * co2_links.length
-        + costs.at["CO2 liquefaction", "capital_cost"]
     )
     investment_onshore = (
         (1 - co2_links.underwater_fraction)
         * costs.at["CO2 pipeline", "investment"]
         * co2_links.length
-        + costs.at["CO2 liquefaction", "investment"]
     )
     cost_submarine = (
         co2_links.underwater_fraction
         * costs.at["CO2 submarine pipeline", "capital_cost"]
         * co2_links.length
-        + costs.at["CO2 liquefaction", "capital_cost"]
     )
     investment_submarine = (
         co2_links.underwater_fraction
         * costs.at["CO2 submarine pipeline", "investment"]
         * co2_links.length
-        + costs.at["CO2 liquefaction", "investment"]
     )
     capital_cost = cost_onshore + cost_submarine
     onight_cost = investment_onshore + investment_submarine
@@ -1164,10 +1199,11 @@ def add_co2_network(n, costs, co2_network_cost_factor=1.0):
     n.add(
         "Link",
         co2_links.index,
-        bus0=co2_links.bus0.values + " co2 stored",
-        bus1=co2_links.bus1.values + " co2 stored",
+        bus0=co2_links.bus0.values + " co2 stored compressed",
+        bus1=co2_links.bus1.values + " co2 stored compressed",
         p_min_pu=-1,
         p_nom_extendable=True,
+        # p_nom_mod=1328,
         length=co2_links.length.values,
         capital_cost=capital_cost.values,
         onight_cost=onight_cost.values,
@@ -7285,6 +7321,11 @@ def add_pcipmi_links(
         f"- replacing {len(duplicates)} existing {carrier}s with PCI/PMI projects of the same bus0 and bus1"
     )
     n.links = n.links.drop(duplicates)
+
+    if carrier=="CO2 pipeline":
+        projects.bus0 = projects.bus0 + " compressed"
+        projects.bus1 = projects.bus1 + " compressed"
+
     projects["carrier"] +=" pcipmi"
     n.add(
         "Link",
@@ -7349,22 +7390,22 @@ def add_pcipmi_co2_buses(
 
     n.add(
         "Bus", 
-        nodes + " co2 stored", 
+        nodes + " co2 stored compressed", 
         location=nodes + " co2 stored", 
         carrier="co2 stored", 
         unit="t_co2", 
-        x=n.buses.loc[nodes, "x"].rename(lambda x: x + " co2 stored"),
-        y=n.buses.loc[nodes, "y"].rename(lambda x: x + " co2 stored"),
+        x=n.buses.loc[nodes, "x"].rename(lambda x: x + " co2 stored compressed"),
+        y=n.buses.loc[nodes, "y"].rename(lambda x: x + " co2 stored compressed"),
         )
 
     if "co2 stored" not in n.carriers.index:
-        n.add("Carrier", "co2 stored")
+        n.add("Carrier", "co2 stored compressed")
 
     # Add connecting links
     n.add(
         "Link",
         nodes + " co2 sequestered",
-        bus0=nodes + " co2 stored",
+        bus0=nodes + " co2 stored compressed",
         bus1=nodes + " co2 sequestered",
         marginal_cost=options["co2_sequestration_cost"],
         capital_cost=0.1, # TODO: needed?
@@ -7424,7 +7465,7 @@ def add_pcipmi_stores(
         n.add(
             "Link",
             missing_co2_buses[0],
-            bus0=missing_co2_buses.index + " co2 stored",
+            bus0=missing_co2_buses.index + " co2 stored compressed",
             bus1=missing_co2_buses[0].values,
             marginal_cost=options["co2_sequestration_cost"],
             capital_cost=0.1, # TODO: needed?

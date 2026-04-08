@@ -264,6 +264,9 @@ if __name__ == "__main__":
 
     # Retrieve costs assumptions
     costs = pd.read_csv(snakemake.input.costs, index_col=["technology", "parameter"])
+    # from https://www.ait.ac.at/themen/flexibilitaet-geschaeftsmodelle/projekte/studie-co2-transportnetz-in-oesterreich-ccu-ccs
+    # 19 MioEUR for 5000 kt/a liquefaction
+    costs.loc[("CO2 liquefaction", "investment"), "value"] = 33288
 
     # Prepare costs
     costs_processed = prepare_costs(

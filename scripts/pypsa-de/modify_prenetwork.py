@@ -1434,7 +1434,6 @@ def allow_cc_retrofit(n, costs):
     # add specific carriers and buses
     buses_de = n.buses[(n.buses.carrier=="AC") & (n.buses.index.str[:2] == "DE")].index
     n.add("Carrier", [carrier + " co2" for carrier in carriers])
-    n.add("Carrier", "CC")
     for carrier in carriers:
         co2_buses = [bus + " " + carrier + " co2" for bus in buses_de]
         n.add("Bus",
@@ -1448,9 +1447,12 @@ def allow_cc_retrofit(n, costs):
             co2_buses,
             bus0=co2_buses,
             bus1="co2 atmosphere",
-            carrier="co2 vent",
+            carrier=carrier,
             p_nom=1000,
             )
+        cc_carrier = carrier + " CC"
+        if cc_carrier not in n.carriers:
+            n.add("Carrier", cc_carrier)
 
         n.add("Link",
             co2_buses,
@@ -1459,7 +1461,7 @@ def allow_cc_retrofit(n, costs):
             bus1=buses_de + " co2 stored",
             bus2=buses_de,
             bus3="co2 atmosphere",
-            carrier="CC",
+            carrier=cc_carrier,
             efficiency=costs.at["cement capture", "capture_rate"],
             efficiency2=-costs.at["cement capture", "compression-electricity-input"],
             efficiency3=1-costs.at["cement capture", "capture_rate"],
@@ -1469,7 +1471,7 @@ def allow_cc_retrofit(n, costs):
 
     # change bus1/bus2 for power and chp plants
     for carrier in ['OCGT', 'CCGT', 'solid biomass']:
-        valid = n.links[(n.links.carrier==carrier) & (n.links.index.str[:2]=="DE")].index
+        valid = n.links[(n.links.carrier==carrier) & (n.links.index.str[:2]=="DE") & ~(n.links.bus1.str.contains("co2"))].index
         # add new bus carrier + "co2 stored"
         bus_names = [bus + " " + carrier + " co2" for bus in n.links.loc[valid, "bus1"]]
         # change bus2 to co2_stored
@@ -1482,7 +1484,8 @@ def allow_cc_retrofit(n, costs):
     for carrier in chp_carrier.keys():
         valid = n.links[(n.links.carrier==carrier) & 
                         (n.links.index.str[:2]=="DE") &
-                        (n.links.build_year != current_year)
+                        (n.links.build_year != current_year) &
+                        ~(n.links.bus1.str.contains("co2"))
                         ].index
         # add new bus carrier + "co2 stored"
         bus_names = [bus + " " + chp_carrier[carrier] + " co2" for bus in n.links.loc[valid, "bus1"]]
@@ -1665,21 +1668,20 @@ def consolidate_shipping_demand(n):
 
 def remove_german_northsea(n):
     logger.info("Removing sequestration potential in North Sea for Germany.")
-    # get stores buses and links
-    idx = n.stores[(n.stores.bus.str.startswith("DE")) & (n.stores.carrier=="co2 sequestered")].index
-    idx_stored = idx.str.replace("sequestered", "stored")
+    # German North Sea stores
+    idx = pd.Index(['DE0 6 offshore 0 co2 sequestered', 'DE0 8 offshore 0 co2 sequestered'])
 
     n.stores.drop(idx, inplace=True)
     n.links.drop(n.links[n.links.bus1.isin(idx)].index, inplace=True)
     n.buses.drop(idx, inplace=True)
 
-    buses = idx.str.replace(" offshore 0 co2 sequestered", "")
+    buses = idx.str.replace(" offshore 0 co2 sequestered", " co2 stored compressed")
     names = idx.str.replace(" offshore 0 co2 sequestered", " NorthernLights Ship")
     logger.info("Adding possibility to ship co2 to Northern Lights.")
     n.add("Link",
           names,
-          bus0=idx_stored,
-          bus1=["NO1 0 offshore 0 co2 stored"],
+          bus0=buses,
+          bus1=["NO1 0 offshore 0 co2 stored compressed"],
           marginal_cost=50, # €/t
           capital_cost=0.1,
           carrier="co2 sequestered",
@@ -1699,7 +1701,7 @@ if __name__ == "__main__":
             ll="vopt",
             sector_opts="none",
             planning_horizons="2035",
-            run="endogenous",
+            run="onshore_seq_endo",
         )
 
     configure_logging(snakemake)
@@ -1793,8 +1795,8 @@ if __name__ == "__main__":
         unravel_industry(n)
     else:
         consolidate_shipping_demand(n)
-
-    remove_german_northsea(n)
+    if current_year < 2045:
+        remove_german_northsea(n)
 
     sanitize_custom_columns(n)
 
