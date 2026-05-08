@@ -1464,7 +1464,7 @@ if __name__ == "__main__":
 
     # Load network
     n = pypsa.Network(snakemake.input.network)
-    planning_horizons = snakemake.wildcards.get("planning_horizons", None)
+    planning_horizons = snakemake.wildcards.get("planning_horizons", "2050")
 
     # Prepare network (settings before solving)
     prepare_network(
@@ -1591,3 +1591,46 @@ if __name__ == "__main__":
             allow_unicode=True,
             sort_keys=False,
         )
+    
+    if hasattr(snakemake.output, "revenue") and hasattr(snakemake.output, "carbon_balance"):
+        # write out the revenue of German loads
+        carrier = n.loads.carrier.unique()
+        def get_de_revenue(n, carrier):
+            revenue = n.statistics.revenue(groupby=["carrier", "bus"]).loc["Load", :, :]
+            revenue_de = revenue[revenue.index.get_level_values("bus").str.startswith("DE")]
+            revenue_de = revenue_de.groupby("carrier").sum()
+            revenue_de = revenue_de.reindex(carrier, fill_value=0)
+            return -revenue_de.sum()/1e9
+        # write out the amount of CO2 capture in Germany
+        def get_carbon_balance(n):
+            # get carbon balance
+            co2_de = (
+                n.statistics.energy_balance(bus_carrier="co2 stored", groupby=["bus", "carrier"])
+                .filter(like="DE")
+                .groupby("carrier")
+                .sum()
+                .div(1e6)
+            )
+            # add import/export to Germany
+            incoming = n.links[
+                (n.links.bus0.str[:2] != "DE") & 
+                (n.links.bus1.str[:2] == "DE") &
+                (n.links.carrier.str.contains("CO2 pipeline"))
+            ].index
+            outgoing = n.links[
+                (n.links.bus0.str[:2] == "DE") & 
+                (n.links.bus1.str[:2] != "DE") &
+                (n.links.carrier.str.contains("CO2 pipeline"))
+            ].index
+            co2_de["trade"] = n.links_t.p0[incoming].mul(n.snapshot_weightings.generators, axis=0).sum().sum() / 1e6 - n.links_t.p0[outgoing].mul(n.snapshot_weightings.generators, axis=0).sum().sum() / 1e6
+            if 'DE0 6 NorthernLights Ship' in n.links.index:
+                co2_de["co2 sequestered"] = -n.links_t.p0[['DE0 6 NorthernLights Ship', 'DE0 8 NorthernLights Ship']].mul(n.snapshot_weightings.generators, axis=0).sum().sum() / 1e6
+
+            co2_de = co2_de[~(co2_de.index.isin(["co2 compression", "co2 expansion"]))]
+
+            return co2_de
+
+        get_carbon_balance(n).to_csv(snakemake.output.carbon_balance)
+        revenue_de = get_de_revenue(n, carrier)
+        with open(snakemake.output.revenue, "w") as f:
+            f.write(f"{revenue_de:.3f}")

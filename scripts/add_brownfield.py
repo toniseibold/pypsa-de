@@ -355,7 +355,8 @@ if __name__ == "__main__":
 
     logger.info(f"Preparing brownfield from the file {snakemake.input.network_p}")
 
-    year = int(snakemake.wildcards.planning_horizons)
+    planning_horizons = snakemake.wildcards.get("planning_horizons", "2050")
+    year = int(planning_horizons)
 
     n = pypsa.Network(snakemake.input.network)
 

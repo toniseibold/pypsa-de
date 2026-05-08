@@ -15,15 +15,12 @@ population.
 
 import json
 import logging
-from collections import Counter
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 from shapely import unary_union
-from shapely.geometry import MultiPoint
-from shapely.ops import triangulate
 
 from scripts._helpers import configure_logging, set_scenario_config, load_costs
 
@@ -34,12 +31,12 @@ DISTANCE_CRS = "EPSG:3035"
 CO2_FACTORS = {
     "process emission": 1.0,
     "process emission from feedstock": 1.0,
-    "methane": 0.20,
-    "gas": 0.20,
+    # "methane": 0.20,
+    # "gas": 0.20,
     "solid biomass": 0.18,
     "biomass": 0.18,
-    "coal": 0.34,
-    "coke": 0.39,
+    # "coal": 0.34,
+    # "coke": 0.39,
 }
 
 START_POINT_PREFIXES = (
@@ -52,7 +49,6 @@ START_POINT_PREFIXES = (
 
 DEFAULT_ALPHA_VALUES = (0.5, 2.0)
 DEFAULT_LENGTH_LIMIT_KM = 4000.0
-DEFAULT_PRUNING_ROUNDS = 3
 
 
 def _find_matching_column(df: pd.DataFrame, key: str) -> str | None:
@@ -202,13 +198,8 @@ def _select_regions(regions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     idx = regions.index.astype(str)
 
     de = regions[idx.str.startswith("DE")].copy()
-    if de.empty:
-        raise ValueError("No German regions found (expected index starting with 'DE').")
 
-    nldk = regions[idx.str.startswith("NL") | idx.str.startswith("DK")].copy()
-    if nldk.empty:
-        logger.warning("No NL/DK regions found in clustered regions input.")
-        return de
+    nldk = regions[regions.index.isin(["NL0 0", "DK0 0"])].copy()
 
     de_proj = de.to_crs(DISTANCE_CRS)
     nldk_proj = nldk.to_crs(DISTANCE_CRS)
@@ -242,81 +233,82 @@ def _build_candidate_edges(
     regions_selected: gpd.GeoDataFrame,
     node_potential: pd.Series,
     alpha: float,
+    start_nodes: set[str],
+    penalty_buses: set[str] | None = None,
 ) -> pd.DataFrame:
-    """Build candidate graph with weighted edge metrics for one alpha value."""
+    """Build Gabriel-filtered Delaunay candidate edges with weighted cost for one alpha."""
+    from scripts.build_transmission_topology import (
+        delaunay_triangulation,
+        prepare_candidate_edges,
+    )
+
+    gabriel_filter_enabled = True
+    min_degree = 1
+    length_factor = 1.25
+
     nodes = regions_selected.index.astype(str)
-    nodes_df = regions_selected.copy()
-    nodes_df.index = nodes
+    geo = regions_selected.to_crs("EPSG:4326")
+    meter = regions_selected.to_crs(DISTANCE_CRS)
 
-    projected = nodes_df.to_crs(DISTANCE_CRS)
-    centroids = projected.geometry.centroid
-    xy = pd.DataFrame({"x": centroids.x, "y": centroids.y}, index=nodes)
+    centroids_geo = geo.geometry.centroid
+    centroids_meter = meter.geometry.centroid
 
-    max_potential = max(float(node_potential.max()), 1e-9)
-    node_potential_norm = node_potential / max_potential
+    coords_geo = np.column_stack(
+        [centroids_geo.x.to_numpy(), centroids_geo.y.to_numpy()]
+    ).astype(float)
+    coords_meter = np.column_stack(
+        [centroids_meter.x.to_numpy(), centroids_meter.y.to_numpy()]
+    ).astype(float)
 
-    coord_to_nodes: dict[tuple[float, float], list[str]] = {}
-    for node in nodes:
-        coord = (float(xy.at[node, "x"]), float(xy.at[node, "y"]))
-        coord_to_nodes.setdefault(coord, []).append(node)
+    delaunay_graph = delaunay_triangulation(
+        bus_ids=nodes,
+        coords_geo=coords_geo,
+        coords_meter=coords_meter,
+        length_factor=length_factor,
+    )
 
-    unique_coords = list(coord_to_nodes)
-    delaunay_edges: set[tuple[tuple[float, float], tuple[float, float]]] = set()
+    selected = prepare_candidate_edges(
+        delaunay_graph=delaunay_graph,
+        gabriel_filter_enabled=gabriel_filter_enabled,
+        node_count=len(nodes),
+        min_degree=min_degree,
+    )
 
-    for triangle in triangulate(MultiPoint(unique_coords)):
-        tri_coords = [
-            (float(x), float(y)) for x, y in list(triangle.exterior.coords)[:3]
-        ]
-        for i in range(3):
-            a = tri_coords[i]
-            b = tri_coords[(i + 1) % 3]
-            if a == b:
-                continue
-            edge = (a, b) if a < b else (b, a)
-            delaunay_edges.add(edge)
+    potential = node_potential.copy()
+    if penalty_buses:
+        for penalty_bus in penalty_buses:
+            if penalty_bus in nodes and penalty_bus.startswith("DE"):
+                potential.loc[penalty_bus] = potential.get(penalty_bus, 0.0) * 0.2
 
-    rows = []
-    seen_bus_pairs: set[tuple[str, str]] = set()
-    for coord_u, coord_v in sorted(delaunay_edges):
-        for u in coord_to_nodes[coord_u]:
-            for v in coord_to_nodes[coord_v]:
-                if u == v:
-                    continue
+    max_potential = max(float(potential.max()), 1e-9)
+    node_potential_norm = potential / max_potential
 
-                bus0, bus1 = (u, v) if u < v else (v, u)
-                pair = (bus0, bus1)
-                if pair in seen_bus_pairs:
-                    continue
-                seen_bus_pairs.add(pair)
+    def weighted_cost(row: pd.Series) -> float:
+        pot_sum = float(
+            node_potential_norm.get(row["bus0"], 0.0)
+            + node_potential_norm.get(row["bus1"], 0.0)
+        )
+        return float(row["length"]) / ((1.0 + pot_sum) ** alpha)
 
-                dx = xy.at[bus0, "x"] - xy.at[bus1, "x"]
-                dy = xy.at[bus0, "y"] - xy.at[bus1, "y"]
-                length_km = float(np.hypot(dx, dy) / 1000.0)
-
-                pot_sum = float(
-                    node_potential_norm.at[bus0] + node_potential_norm.at[bus1]
-                )
-                weighted_cost = length_km / ((1.0 + pot_sum) ** alpha)
-                rows.append(
-                    {
-                        "bus0": bus0,
-                        "bus1": bus1,
-                        "length_km": length_km,
-                        "weighted_cost": weighted_cost,
-                        "alpha": alpha,
-                        "is_interconnector": (
-                            bus0.startswith(("NL", "DK"))
-                            or bus1.startswith(("NL", "DK"))
-                        ),
-                    }
-                )
-
-    edges = pd.DataFrame(rows)
-    to_drop = edges[~(edges.bus0.str.startswith("DE")) & ~(edges.bus1.str.startswith("DE"))].index
-    edges = edges.drop(to_drop)
+    edges = selected[["bus0", "bus1", "length"]].copy().rename(
+        columns={"length": "length_km"}
+    )
+    edges["weighted_cost"] = selected.apply(weighted_cost, axis=1)
+    edges["alpha"] = alpha
+    edges["is_interconnector"] = (
+        edges["bus0"].str.startswith(("NL", "DK"))
+        | edges["bus1"].str.startswith(("NL", "DK"))
+    )
     edges = edges.reset_index(drop=True)
-    if edges.empty:
-        raise ValueError("Not enough regions to build a topology graph.")
+
+    # remove exit edges that are not in start_nodes
+    if "DE0 6" in start_nodes:
+        edges = edges[~edges.is_interconnector]
+    elif "NL0 0" in start_nodes:
+        edges = edges[~(edges.bus0=="DK0 0") & ~(edges.bus1=="DK0 0")]
+    elif "DK0 0" in start_nodes:
+        edges = edges[~(edges.bus0=="NL0 0") & ~(edges.bus1=="NL0 0")]
+
     return edges
 
 
@@ -329,19 +321,9 @@ def _identify_start_cases(nodes: list[str]) -> dict[str, set[str]]:
 
     start_cases: dict[str, set[str]] = {
         "de06_only": by_prefix["DE0 6"],
-        "de08_only": by_prefix["DE0 8"],
         "nl00_only": by_prefix["NL0 0"],
-        "nl04_only": by_prefix["NL0 4"],
         "dk00_only": by_prefix["DK0 0"],
     }
-    start_cases["all_start_points"] = set().union(*start_cases.values())
-
-    missing_cases = [name for name, case_nodes in start_cases.items() if not case_nodes]
-    if missing_cases:
-        raise ValueError(
-            "Missing required start-point nodes for cases: "
-            + ", ".join(missing_cases)
-        )
 
     logger.info(
         "Using start cases: %s",
@@ -381,32 +363,58 @@ def _select_rooted_tree(
     total_length = 0.0
 
     # Force at least one edge from the selected start point to the rest.
-    for target_start in ranked_starts:
+    root_start = ranked_starts[0]
+    if root_start.startswith(("NL", "DK")):
+        # For international exits, force the nearest direct DE connection first.
+        anchor_candidates: list[tuple[float, int, str, str]] = []
         for edge_idx in eligible_index:
             edge = edges.loc[edge_idx]
             u = edge["bus0"]
             v = edge["bus1"]
-            if u == target_start and v not in connected:
-                edge_connects_target = True
-            elif v == target_start and u not in connected:
-                edge_connects_target = True
-            else:
-                edge_connects_target = False
+            if u == root_start and v.startswith("DE"):
+                anchor_candidates.append((float(edge["length_km"]), edge_idx, u, v))
+            elif v == root_start and u.startswith("DE"):
+                anchor_candidates.append((float(edge["length_km"]), edge_idx, u, v))
 
-            if not edge_connects_target:
-                continue
+        if not anchor_candidates:
+            return []
 
-            length = float(edge["length_km"])
-            if total_length + length > max_total_length_km:
-                continue
+        _, edge_idx, u, v = min(anchor_candidates, key=lambda item: item[0])
+        length = float(edges.at[edge_idx, "length_km"])
+        if total_length + length > max_total_length_km:
+            return []
 
-            connected.update([u, v])
-            used_edges.add(edge_idx)
-            selected.append(edge_idx)
-            total_length += length
-            break
-        if selected:
-            break
+        connected.update([u, v])
+        used_edges.add(edge_idx)
+        selected.append(edge_idx)
+        total_length += length
+    else:
+        for target_start in ranked_starts:
+            for edge_idx in eligible_index:
+                edge = edges.loc[edge_idx]
+                u = edge["bus0"]
+                v = edge["bus1"]
+                if u == target_start and v not in connected:
+                    edge_connects_target = True
+                elif v == target_start and u not in connected:
+                    edge_connects_target = True
+                else:
+                    edge_connects_target = False
+
+                if not edge_connects_target:
+                    continue
+
+                length = float(edge["length_km"])
+                if total_length + length > max_total_length_km:
+                    continue
+
+                connected.update([u, v])
+                used_edges.add(edge_idx)
+                selected.append(edge_idx)
+                total_length += length
+                break
+            if selected:
+                break
 
     while True:
         added = False
@@ -495,8 +503,7 @@ def _write_topology(
     out.insert(0, "topology", topology_name)
     out.insert(1, "algorithm", algorithm)
     out.insert(2, "start_case", start_case)
-    out.insert(3, "alpha", alpha)
-    out.insert(4, "length_limit_km", length_limit_km)
+    out.insert(3, "length_limit_km", length_limit_km)
     out["bus0_co2_potential_mtco2"] = out["bus0"].map(
         node_components["total_co2_potential_mtco2"]
     )
@@ -552,16 +559,13 @@ if __name__ == "__main__":
     co2_topology_cfg = snakemake.params.co2_topology
     alpha_values = co2_topology_cfg.get("alpha_values", list(DEFAULT_ALPHA_VALUES))
     alpha_values = [float(value) for value in alpha_values]
-
-    pruning_rounds = int(co2_topology_cfg.get("pruning_rounds", DEFAULT_PRUNING_ROUNDS))
-
+    alpha_values = [0.5, 2.0]
     length_limit_km = float(co2_topology_cfg.get("length_limit_km", DEFAULT_LENGTH_LIMIT_KM))
 
     logger.info(
-        "Building CO2 topologies with length limit %s km, alpha values %s, and pruning rounds %s.",
+        "Building CO2 topologies with length limit %s km and alpha values %s.",
         length_limit_km,
         alpha_values,
-        pruning_rounds,
     )
 
     regions = gpd.read_file(snakemake.input.regions).set_index("name")
@@ -610,70 +614,84 @@ if __name__ == "__main__":
     start_case_items = list(start_cases.items())
     all_nodes_set = set(selected_nodes.tolist())
     definitions: list[dict] = []
-    expected_per_round = len(start_case_items) * len(alpha_values)
+    rng = np.random.default_rng(seed=20260423)
 
-    rng = np.random.default_rng(seed=20260422)
+    for start_case, start_nodes in start_case_items:
+        for alpha in alpha_values:
+            edges = _build_candidate_edges(
+                regions_selected=selected_regions,
+                node_potential=node_components["total_co2_potential_mtco2"],
+                alpha=alpha,
+                start_nodes=start_nodes,
+                penalty_buses=None,
+            )
 
-    for round_id in range(1, pruning_rounds + 1):
-        round_entries: list[dict] = []
+            weighted_order = (
+                edges.sort_values("weighted_cost", ascending=True).index.tolist()
+            )
+            selected_idx = _select_rooted_tree(
+                edges,
+                weighted_order,
+                start_nodes=start_nodes,
+                max_total_length_km=length_limit_km,
+                node_potential=node_components["total_co2_potential_mtco2"],
+            )
 
-        if round_id == 2:
-            n_to_remove = 5
-        elif round_id >= 3:
-            n_to_remove = 7
-        else:
-            n_to_remove = 0
+            selected_edges = edges.loc[selected_idx].copy()
+            
+            definitions.append(
+                {
+                    "algorithm": "weighted_mst",
+                    "start_case": start_case,
+                    "alpha": float(alpha),
+                    "length_limit_km": float(length_limit_km),
+                    "start_nodes": set(start_nodes),
+                    "all_nodes": all_nodes_set,
+                    "edges": selected_edges,
+                    "penalty_buses": [],
+                }
+            )
 
-        candidate_edges: list[int] = []
-        if n_to_remove > 0:
-            edge_counter: Counter[int] = Counter()
-            for defn in definitions:
-                edge_counter.update(defn["edges"].index)
+            # get all connected buses
+            connected_buses = set()
+            for row in selected_edges.itertuples(index=False):
+                connected_buses.add(row.bus0)
+                connected_buses.add(row.bus1)
+            # select only the ones starting with DE
+            connected_buses = {bus for bus in connected_buses if bus.startswith("DE")}
 
-            all_candidates = edge_counter.most_common()
-            if not all_candidates:
-                raise ValueError(
-                    f"Cannot prune edges in round {round_id}: no prior edges available."
+            connected_buses_sorted = sorted(connected_buses)
+            if not connected_buses_sorted:
+                continue
+
+            base_edge_set = frozenset(
+                zip(selected_edges["bus0"], selected_edges["bus1"])
+            )
+            seen_edge_sets = {base_edge_set}
+
+            sample_size = min(3, len(connected_buses_sorted))
+            n_penalized_target = 3
+            n_penalized_added = 0
+            max_attempts = 15
+            attempt = 0
+            while n_penalized_added < n_penalized_target and attempt < max_attempts:
+                attempt += 1
+                penalized_bus_list = sorted(
+                    rng.choice(connected_buses_sorted, size=sample_size, replace=False).tolist()
                 )
-
-            threshold_index = min(n_to_remove - 1, len(all_candidates) - 1)
-            threshold_count = all_candidates[threshold_index][1]
-            candidate_edges = [
-                edge_idx for edge_idx, count in all_candidates if count >= threshold_count
-            ]
-
-            if len(candidate_edges) < n_to_remove:
-                candidate_edges = [edge_idx for edge_idx, _count in all_candidates]
-
-        for start_case, start_nodes in start_case_items:
-            for alpha in alpha_values:
-                edges = _build_candidate_edges(
+                penalized_bus_set = set(penalized_bus_list)
+                edges_p = _build_candidate_edges(
                     regions_selected=selected_regions,
                     node_potential=node_components["total_co2_potential_mtco2"],
                     alpha=alpha,
+                    start_nodes=start_nodes,
+                    penalty_buses=penalized_bus_set,
                 )
-
-                removed_edge_ids: list[int] = []
-                if n_to_remove > 0:
-                    if len(candidate_edges) <= n_to_remove:
-                        removed_edge_ids = list(candidate_edges)
-                    else:
-                        removed_edge_ids = list(
-                            rng.choice(candidate_edges, size=n_to_remove, replace=False)
-                        )
-
-                    removed_set = set(removed_edge_ids)
-                    keep_mask = [idx not in removed_set for idx in edges.index]
-                    edges = edges.loc[keep_mask].copy()
-
-                if edges.empty:
-                    continue
-
                 weighted_order = (
-                    edges.sort_values("weighted_cost", ascending=True).index.tolist()
+                    edges_p.sort_values("weighted_cost", ascending=True).index.tolist()
                 )
                 selected_idx = _select_rooted_tree(
-                    edges,
+                    edges_p,
                     weighted_order,
                     start_nodes=start_nodes,
                     max_total_length_km=length_limit_km,
@@ -682,9 +700,23 @@ if __name__ == "__main__":
                 if not selected_idx:
                     continue
 
-                selected_edges = edges.loc[selected_idx].copy()
+                penalized_edges = edges_p.loc[selected_idx].copy()
+                penalized_edge_set = frozenset(
+                    zip(penalized_edges["bus0"], penalized_edges["bus1"])
+                )
+                if penalized_edge_set in seen_edge_sets:
+                    logger.info(
+                        "Penalized topology (%s, alpha=%s, penalty=%s) is identical to "
+                        "an existing topology — choosing different penalized regions.",
+                        start_case,
+                        alpha,
+                        penalized_bus_list,
+                    )
+                    continue
 
-                round_entries.append(
+                seen_edge_sets.add(penalized_edge_set)
+                n_penalized_added += 1
+                definitions.append(
                     {
                         "algorithm": "weighted_mst",
                         "start_case": start_case,
@@ -692,39 +724,30 @@ if __name__ == "__main__":
                         "length_limit_km": float(length_limit_km),
                         "start_nodes": set(start_nodes),
                         "all_nodes": all_nodes_set,
-                        "edges": selected_edges,
-                        "removed_edge_ids": sorted(removed_edge_ids),
-                        "round_id": round_id,
+                        "edges": penalized_edges,
+                        "penalty_buses": penalized_bus_list,
                     }
                 )
 
-        if not round_entries:
-            logger.warning("No more feasible topologies after pruning edges.")
-            break
-
-        if len(round_entries) != expected_per_round:
-            raise ValueError(
-                "Expected "
-                f"{expected_per_round} topologies in round {round_id} "
-                f"(start_cases={len(start_case_items)}, alpha_values={len(alpha_values)}), "
-                f"but generated {len(round_entries)}."
-            )
-
-        definitions.extend(round_entries)
-        logger.info(
-            "Round %s built %s topologies (removed %s edges per topology).",
-            round_id,
-            len(round_entries),
-            n_to_remove,
-        )
+    logger.info(
+        "Built %s CO2 topology variants for start cases %s and alphas %s.",
+        len(definitions),
+        [name for name, _ in start_case_items],
+        alpha_values,
+    )
 
     summary_rows = []
     for topology_id, definition in enumerate(definitions):
         topology_name = f"topology_{topology_id:03d}"
+        penalty_suffix = ""
+        if definition.get("penalty_buses"):
+            penalty_suffix = "__penalty_" + "-".join(
+                bus.replace(" ", "_") for bus in definition["penalty_buses"]
+            )
         variant_name = (
             f"{definition['algorithm']}__{definition['start_case']}"
             f"__alpha{definition['alpha']:g}__{int(definition['length_limit_km'])}km"
-            f"__round{definition['round_id']:02d}"
+            f"{penalty_suffix}"
         )
 
         summary_row = _write_topology(
@@ -740,11 +763,7 @@ if __name__ == "__main__":
             node_components=node_components,
         )
         summary_row["variant_name"] = variant_name
-        summary_row["round_id"] = definition["round_id"]
-        summary_row["n_removed_edges"] = len(definition["removed_edge_ids"])
-        summary_row["removed_edge_ids"] = ";".join(
-            str(edge_idx) for edge_idx in definition["removed_edge_ids"]
-        )
+        summary_row["penalty_buses"] = ";".join(definition.get("penalty_buses", []))
         summary_rows.append(summary_row)
 
     summary = pd.DataFrame(summary_rows)
@@ -769,10 +788,9 @@ if __name__ == "__main__":
     (manifest_dir / ".ready").touch()
 
     logger.info(
-        "Wrote %s CO2 topology variants to %s at %s km (alpha values=%s, pruning_rounds=%s).",
+        "Wrote %s CO2 topology variants to %s at %s km (alpha values=%s).",
         len(definitions),
         output_dir,
         int(length_limit_km),
         alpha_values,
-        pruning_rounds,
     )

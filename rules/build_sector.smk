@@ -1240,6 +1240,37 @@ rule build_industrial_energy_demand_per_node:
         scripts("build_industrial_energy_demand_per_node.py")
 
 
+checkpoint build_co2_topologies:
+    message:
+        "Building graph-based CO2 network topology variants for Germany ({wildcards.clusters} clusters, 2035 planning horizon)"
+    params:
+        co2_topology=config_provider("co2_topology"),
+    input:
+        regions=resources("regions_onshore_base_s_{clusters}.geojson"),
+        clustered_pop_layout=resources("pop_layout_base_s_{clusters}.csv"),
+        industrial_demand=resources(
+            "industrial_energy_demand_base_s_{clusters}_2035.csv"
+        ),
+        costs=lambda w: (
+            resources(f"costs_{config_provider('costs', 'year')(w)}_processed.csv")
+            if config_provider("foresight")(w) == "overnight"
+            else resources("costs_2035_processed.csv")
+        ),
+    output:
+        topologies=directory(
+            resources("co2_topologies/base_s_{clusters}_2035")
+        ),
+    threads: 1
+    resources:
+        mem_mb=4000,
+    log:
+        logs("build_co2_topologies_s_{clusters}_2035.log"),
+    benchmark:
+        benchmarks("build_co2_topologies/s_{clusters}_2035")
+    script:
+        scripts("build_co2_topologies.py")
+
+
 rule build_industrial_energy_demand_per_country_today:
     message:
         "Building current industrial energy demand by country"

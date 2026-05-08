@@ -6032,8 +6032,8 @@ def add_industry(
         heat_input = costs.at["cement dry clinker", "heat-input"]
         electricity_input = costs.at["cement dry clinker", "electricity-input"]
         # process emission from calcination + gas emissions
-        # https://www.ipcc-nggip.iges.or.jp/efdb/ef_detail.php
-        co2_emission = 0.5071/heat_input + costs.at["gas", "CO2 intensity"]*gas_input/heat_input
+        # process emissions is taken from statistical data / demand of cement(clinker)
+        co2_emission = 0.711/heat_input + costs.at["gas", "CO2 intensity"]*gas_input/heat_input
         n.add("Carrier", "cement kiln")
         n.add(
             "Link",
@@ -7576,8 +7576,8 @@ if __name__ == "__main__":
             clusters="89",
             ll="vopt",
             sector_opts="none",
-            planning_horizons="2050",
-            run="pcipmi",
+            planning_horizons="2035",
+            run="endogenous",
         )
 
     configure_logging(snakemake)  # pylint: disable=E0606
@@ -7690,32 +7690,32 @@ if __name__ == "__main__":
 
     spatial_pcipmi = add_pcipmi_buses_offshore(n, snakemake.input.buses_pcipmi_offshore)
 
-    if (carrier_networks["H2"]["enable"] and carrier_networks["H2"]["include"]["pcipmi"]) or investment_year == 2050:
-        # adding electrolysis units at the offshore buses
-        add_pcipmi_h2_buses(
-            n,
-            costs,
-            spatial_pcipmi.nodes,
-        )
-        add_pcipmi_links(
-            n,
-            snakemake.input.pcipmi_links_h2_pipeline,
-            investment_year,
-            costs,
-            "H2 pipeline",
-            carrier_networks,
-            delay=delay_pd.loc[snakemake.wildcards.run, investment_year],
-        )
-    if (pcipmi_projects["enable"] and "stores_h2" in pcipmi_projects["include"]) or investment_year == 2050:
-        add_pcipmi_stores(
-            n, 
-            snakemake.input.stores_h2,
-            investment_year,
-            costs,
-            pcipmi_projects,
-            options,
-            delay=delay_pd.loc[snakemake.wildcards.run, investment_year]
-        )
+    # if (carrier_networks["H2"]["enable"] and carrier_networks["H2"]["include"]["pcipmi"]) or investment_year == 2050:
+    #     # adding electrolysis units at the offshore buses
+    #     add_pcipmi_h2_buses(
+    #         n,
+    #         costs,
+    #         spatial_pcipmi.nodes,
+    #     )
+    #     add_pcipmi_links(
+    #         n,
+    #         snakemake.input.pcipmi_links_h2_pipeline,
+    #         investment_year,
+    #         costs,
+    #         "H2 pipeline",
+    #         carrier_networks,
+    #         delay=delay_pd.loc[snakemake.wildcards.run, investment_year],
+    #     )
+    # if (pcipmi_projects["enable"] and "stores_h2" in pcipmi_projects["include"]) or investment_year == 2050:
+    #     add_pcipmi_stores(
+    #         n, 
+    #         snakemake.input.stores_h2,
+    #         investment_year,
+    #         costs,
+    #         pcipmi_projects,
+    #         options,
+    #         delay=delay_pd.loc[snakemake.wildcards.run, investment_year]
+    #     )
     if (carrier_networks["CO2"]["enable"] and carrier_networks["CO2"]["include"]["greenfield"]) or investment_year==2050:
         add_co2_network(
             n,
@@ -7723,31 +7723,31 @@ if __name__ == "__main__":
             co2_network_cost_factor=carrier_networks["CO2"]["options"]["cost_factor"],
         )
 
-    if (carrier_networks["CO2"]["enable"] and carrier_networks["CO2"]["include"]["pcipmi"]) or investment_year == 2050:
-        add_pcipmi_co2_buses(
-            n,
-            spatial_pcipmi.nodes,
-        )
-        add_pcipmi_links(
-            n,
-            snakemake.input.pcipmi_links_co2_pipeline,
-            investment_year,
-            costs,
-            "CO2 pipeline",
-            carrier_networks,
-            delay=delay_pd.loc[snakemake.wildcards.run, investment_year],
-        )
+    # if (carrier_networks["CO2"]["enable"] and carrier_networks["CO2"]["include"]["pcipmi"]) or investment_year == 2050:
+    #     add_pcipmi_co2_buses(
+    #         n,
+    #         spatial_pcipmi.nodes,
+    #     )
+    #     add_pcipmi_links(
+    #         n,
+    #         snakemake.input.pcipmi_links_co2_pipeline,
+    #         investment_year,
+    #         costs,
+    #         "CO2 pipeline",
+    #         carrier_networks,
+    #         delay=delay_pd.loc[snakemake.wildcards.run, investment_year],
+    #     )
 
-    if (pcipmi_projects["enable"] and "stores_co2" in pcipmi_projects["include"]) or investment_year == 2050:
-        add_pcipmi_stores(
-            n, 
-            snakemake.input.stores_co2,
-            investment_year,
-            costs,
-            pcipmi_projects,
-            options,
-            delay=delay_pd.loc[snakemake.wildcards.run, investment_year]
-        )
+    # if (pcipmi_projects["enable"] and "stores_co2" in pcipmi_projects["include"]) or investment_year == 2050:
+    #     add_pcipmi_stores(
+    #         n, 
+    #         snakemake.input.stores_co2,
+    #         investment_year,
+    #         costs,
+    #         pcipmi_projects,
+    #         options,
+    #         delay=delay_pd.loc[snakemake.wildcards.run, investment_year]
+    #     )
     # Drop PCI-PMI offshore elec buses
     n.buses.drop(spatial_pcipmi.nodes, inplace=True)
     n.links = _remove_dangling_branches(n.links, n.buses) # PCI-PMI AC offshore buses are not needed

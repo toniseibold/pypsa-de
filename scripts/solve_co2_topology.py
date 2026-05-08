@@ -48,6 +48,7 @@ from pypsa.descriptors import get_switchable_as_dense as get_as_dense
 from scripts._benchmark import memory_logger
 from scripts._helpers import (
     PYPSA_V1,
+    load_costs,
     configure_logging,
     get,
     set_scenario_config,
@@ -1452,7 +1453,8 @@ if __name__ == "__main__":
             configfiles="config/config.de.yaml",
             sector_opts="none",
             run="endogenous",
-            topology="/home/toni-seibold/dev/pypsa-de-co2/resources/03_17_run/endogenous/co2_topologies/base_s_89_2035/topologies/topology_000.csv",
+            planning_horizons="2035",
+            topology="/home/toni-seibold/dev/pypsa-de-co2/resources/03_17_run/endogenous/co2_topologies/base_s_89_2035/topologies/topology_000",
         )
     configure_logging(snakemake)
     set_scenario_config(snakemake)
@@ -1488,6 +1490,7 @@ if __name__ == "__main__":
 
     topology = pd.read_csv(topology_file)
     topology.index = "CO2 pipeline " + topology.bus0 + " -> " + topology.bus1 + "-2035"
+    costs = load_costs(snakemake.input.costs)
 
     n.add(
         "Link",
@@ -1499,6 +1502,7 @@ if __name__ == "__main__":
         p_min_pu=-1,
         lifetime=50,
         build_year=2035,
+        capital_cost=costs.at["CO2 pipeline", "capital_cost"]*topology.length_km,
         length=topology.length_km,
         reversed=False,
     )

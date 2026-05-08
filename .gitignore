@@ -107,6 +107,7 @@ CLAUDE.local.md
 !.pixi/config.toml
 
 /report
+/documentation
 /eem_paper
 .ipynb
 /scripts/pypsa-de/additional_functionality_perfect.py
