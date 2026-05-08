@@ -263,8 +263,9 @@ rule modify_prenetwork_co2_topology_2050:
     resources:
         mem_mb=4000,
     log:
-        RESULTS
-        + "logs/modify_prenetwork_co2_topology_2050_{topology}_s_{clusters}_{opts}_{sector_opts}.log",
+        logs(
+            "modify_prenetwork_co2_topology_2050/{topology}/base_s_{clusters}_{opts}_{sector_opts}.log"
+        ),
     script:
         scripts("pypsa-de/modify_prenetwork.py")
 

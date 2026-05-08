@@ -660,12 +660,9 @@ rule build_ambient_air_temperature_yearly_average:
     resources:
         mem_mb=5000,
     log:
-        RESULTS + "logs/build_ambient_air_temperature_yearly_average/base_s_{clusters}",
+        logs("build_ambient_air_temperature_yearly_average/base_s_{clusters}.log"),
     benchmark:
-        (
-            RESULTS
-            + "benchmarks/build_ambient_air_temperature_yearly_average/base_s_{clusters}"
-        )
+        benchmarks("build_ambient_air_temperature_yearly_average/base_s_{clusters}")
     script:
         scripts("build_ambient_air_temperature_yearly_average.py")
 

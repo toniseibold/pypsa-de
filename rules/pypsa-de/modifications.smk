@@ -254,9 +254,6 @@ rule modify_prenetwork:
         regions_offshore=resources("regions_offshore_base_s_{clusters}.geojson"),
         offshore_connection_points="data/pypsa-de/offshore_connection_points.csv",
         new_industrial_energy_demand="data/pypsa-de/UBA_Projektionsbericht2025_Abbildung31_MWMS.csv",
-        pcipmi_projects=resources(
-            "pcipmi_projects/links_h2_pipeline_s_{clusters}_{opts}.csv"
-        ),
     output:
         network=resources(
             "networks/base_s_{clusters}_{opts}_{sector_opts}_{planning_horizons}_final.nc"
