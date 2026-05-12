@@ -665,7 +665,7 @@ if __name__ == "__main__":
     alpha_values = co2_topology_cfg.get("alpha_values", list(DEFAULT_ALPHA_VALUES))
     alpha_values = [float(value) for value in alpha_values]
     alpha_values = [0.5, 2.0]
-    length_limit_km = 1500.0 # float(co2_topology_cfg.get("length_limit_km", DEFAULT_LENGTH_LIMIT_KM))
+    length_limit_km = float(co2_topology_cfg.get("length_limit_km", DEFAULT_LENGTH_LIMIT_KM))
 
     logger.info(
         "Building CO2 topologies with length limit %s km and alpha values %s.",
