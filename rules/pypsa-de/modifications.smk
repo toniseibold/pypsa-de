@@ -219,7 +219,6 @@ rule modify_prenetwork:
             "pypsa-de", "limit_cross_border_flows_ac"
         ),
         industry_relocation=config_provider("sector", "industry_relocation"),
-        carrier_networks=config_provider("carrier_networks"),
         ammonia=config_provider("sector", "ammonia"),
     input:
         network=resources(

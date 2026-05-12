@@ -1645,3 +1645,7 @@ if __name__ == "__main__":
     revenue_de = get_de_revenue(n, carrier)
     with open(snakemake.output.revenue, "w") as f:
         f.write(f"{revenue_de:.3f}")
+
+    system_costs = (n.statistics.capex().sum() + n.statistics.opex().sum()) / 1e9
+    with open(snakemake.output.system_costs, "w") as f:
+        f.write(f"{system_costs:.3f}")

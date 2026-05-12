@@ -66,6 +66,8 @@ rule solve_co2_topology:
         + "co2_topologies/{topology}/config.base_s_{clusters}_{opts}_{sector_opts}.yaml",
         revenue=RESULTS
         + "co2_topologies/{topology}/base_s_{clusters}_{opts}_{sector_opts}_revenue.txt",
+        system_costs=RESULTS
+        + "co2_topologies/{topology}/base_s_{clusters}_{opts}_{sector_opts}_system_costs.txt",
         carbon_balance=RESULTS
         + "co2_topologies/{topology}/base_s_{clusters}_{opts}_{sector_opts}_carbon_balance.csv",
         topology=RESULTS
@@ -224,7 +226,6 @@ rule modify_prenetwork_co2_topology_2050:
             "pypsa-de", "limit_cross_border_flows_ac"
         ),
         industry_relocation=config_provider("sector", "industry_relocation"),
-        carrier_networks=config_provider("carrier_networks"),
         ammonia=config_provider("sector", "ammonia"),
     input:
         network=resources(
@@ -253,9 +254,6 @@ rule modify_prenetwork_co2_topology_2050:
         regions_offshore=resources("regions_offshore_base_s_{clusters}.geojson"),
         offshore_connection_points="data/pypsa-de/offshore_connection_points.csv",
         new_industrial_energy_demand="data/pypsa-de/UBA_Projektionsbericht2025_Abbildung31_MWMS.csv",
-        pcipmi_projects=resources(
-            "pcipmi_projects/links_h2_pipeline_s_{clusters}_{opts}.csv"
-        ),
     output:
         network=resources(
             "co2_topologies_2050/{topology}/base_s_{clusters}_{opts}_{sector_opts}_2050_final.nc"
@@ -287,6 +285,7 @@ rule solve_co2_topology_2050:
         ),
         co2_totals_name=resources("co2_totals.csv"),
         energy_totals=resources("energy_totals.csv"),
+        delaunay_candidates=resources("delaunay_candidates_{clusters}.csv"),
     output:
         network=RESULTS
         + "co2_topologies_2050/{topology}/base_s_{clusters}_{opts}_{sector_opts}.nc",
@@ -294,6 +293,8 @@ rule solve_co2_topology_2050:
         + "co2_topologies_2050/{topology}/config.base_s_{clusters}_{opts}_{sector_opts}.yaml",
         revenue=RESULTS
         + "co2_topologies_2050/{topology}/base_s_{clusters}_{opts}_{sector_opts}_revenue.txt",
+        system_costs=RESULTS
+        + "co2_topologies_2050/{topology}/base_s_{clusters}_{opts}_{sector_opts}_system_costs.txt",
         carbon_balance=RESULTS
         + "co2_topologies_2050/{topology}/base_s_{clusters}_{opts}_{sector_opts}_carbon_balance.csv",
     shadow:

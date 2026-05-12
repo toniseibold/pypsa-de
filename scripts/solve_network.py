@@ -1440,18 +1440,68 @@ def create_optimization_model(
     return n
 
 
+def replace_with_delaunay_candidates(n, fn):
+    """
+    Replace German CO2 pipeline candidates with Delaunay triangulation candidates.
+
+    Parameters
+    ----------
+    n : pypsa.Network
+        The PyPSA network instance
+    fn : str
+        Path to the Delaunay triangulation candidates NetCDF file
+
+    Returns
+    -------
+    pypsa.Network
+        Updated network with replaced CO2 pipeline candidates
+    """
+
+    to_drop = n.links[
+        n.links.carrier.str.contains("CO2 pipeline") &
+        (n.links.p_nom_extendable) &
+        ((n.links.bus0.str.startswith("DE")) & (n.links.bus1.str.startswith("DE"))) &
+        ~(n.links.index.str.contains("offshore") &
+          (n.links.p_nom_extendable))
+    ].index
+    n.links.drop(to_drop, inplace=True)
+
+    # add delaunay topology
+    delaunay_candidates = pd.read_csv(fn)
+
+    delaunay_candidates.index = "CO2 pipeline " + delaunay_candidates.bus0 + " -> " + delaunay_candidates.bus1 + "-2050"
+    costs = 217.628639081083
+    n.add(
+        "Link",
+        delaunay_candidates.index,
+        bus0=delaunay_candidates.bus0 + " co2 stored compressed",
+        bus1=delaunay_candidates.bus1 + " co2 stored compressed",
+        carrier="CO2 pipeline",
+        p_nom_extendable=True,
+        p_min_pu=-1,
+        lifetime=50,
+        build_year=2050,
+        capital_cost=costs*delaunay_candidates.length_km,
+        length=delaunay_candidates.length_km,
+        reversed=False,
+    )
+    return n
+
+
+
 if __name__ == "__main__":
     if "snakemake" not in globals():
         from scripts._helpers import mock_snakemake
 
         snakemake = mock_snakemake(
-            "solve_sector_network_myopic",
+            "solve_co2_topology_2050",
             opts="",
             clusters="89",
             configfiles="config/config.de.yaml",
             sector_opts="none",
-            planning_horizons="2025",
-            run="endogenous",
+            planning_horizons="2050",
+            run="topo_1500km",
+            topology="topology_000",
         )
     configure_logging(snakemake)
     set_scenario_config(snakemake)
@@ -1465,6 +1515,10 @@ if __name__ == "__main__":
     # Load network
     n = pypsa.Network(snakemake.input.network)
     planning_horizons = snakemake.wildcards.get("planning_horizons", "2050")
+
+    if hasattr(snakemake.output, "delaunay_candidates"):
+        logger.info("Replacing German CO2 pipeline candidates with Delaunay triangulation candidates...")
+        n = replace_with_delaunay_candidates(n, snakemake.output.delaunay_candidates)
 
     # Prepare network (settings before solving)
     prepare_network(
@@ -1634,3 +1688,6 @@ if __name__ == "__main__":
         revenue_de = get_de_revenue(n, carrier)
         with open(snakemake.output.revenue, "w") as f:
             f.write(f"{revenue_de:.3f}")
+        system_costs = (n.statistics.capex().sum() + n.statistics.opex().sum()) / 1e9
+        with open(snakemake.output.system_costs, "w") as f:
+            f.write(f"{system_costs:.3f}")

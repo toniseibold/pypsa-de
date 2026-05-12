@@ -653,7 +653,7 @@ if __name__ == "__main__":
             "build_co2_topologies",
             clusters=89,
             planning_horizons=2035,
-            run="endogenous",
+            run="topo_1500km",
         )
 
     configure_logging(snakemake)
@@ -959,3 +959,12 @@ if __name__ == "__main__":
         int(length_limit_km),
         alpha_values,
     )
+
+    edges = _build_candidate_edges(
+        regions_selected=selected_regions,
+        node_potential=node_components["total_co2_potential_mtco2"],
+        alpha=0,
+        start_nodes="DE0 6",
+        penalty_buses=None,
+    )
+    edges[["bus0", "bus1", "length_km"]].to_csv(snakemake.output.delaunay_candidates, index=False)

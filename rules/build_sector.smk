@@ -1260,6 +1260,7 @@ checkpoint build_co2_topologies:
         topologies=directory(
             resources("co2_topologies/base_s_{clusters}_2035")
         ),
+        delaunay_candidates=resources("delaunay_candidates_{clusters}.csv"),
     threads: 1
     resources:
         mem_mb=4000,
