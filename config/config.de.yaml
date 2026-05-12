@@ -61,6 +61,7 @@ scenario:
   planning_horizons:
   - 2025
   - 2035
+  - 2050
 
 existing_capacities:
   grouping_years_power: [1920, 1950, 1955, 1960, 1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020, 2025]
@@ -313,12 +314,17 @@ sector:
     rural: true
   co2_spatial: true
   co2_network: true
+  cc_capital_cost_factor:
+    gas: 2.0
+    biomass: 1.8
+    coal: 1.8
+    waste: 1.7
+    cement: 1.0
   co2_vent: true
   co2_sequestration_cost: 35
   regional_co2_sequestration_potential:
     enable: true
     attribute:
-    - conservative estimate Mt
     - conservative estimate GAS Mt
     - conservative estimate OIL Mt
     - conservative estimate aquifer Mt

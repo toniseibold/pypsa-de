@@ -1289,7 +1289,7 @@ def add_biomass_to_methanol_cc(n, costs):
     )
 
 
-def add_methanol_to_power(n, costs, pop_layout, types=None):
+def add_methanol_to_power(n, costs, pop_layout, options, types=None):
     if types is None:
         types = {}
 
@@ -1347,8 +1347,6 @@ def add_methanol_to_power(n, costs, pop_layout, types=None):
             "Adding methanol CCGT power plants with post-combustion carbon capture."
         )
 
-        # TODO consider efficiency changes / energy inputs for CC
-
         # efficiency * EUR/MW * (annuity + FOM)
         capital_cost = costs.at["CCGT", "efficiency"] * costs.at["CCGT", "capital_cost"]
         onight_cost = costs.at["CCGT", "investment"] * costs.at["CCGT", "efficiency"]
@@ -1356,11 +1354,21 @@ def add_methanol_to_power(n, costs, pop_layout, types=None):
         capital_cost_cc = (
             capital_cost
             + costs.at["cement capture", "capital_cost"]
+            * options["cc_capital_cost_factor"]["gas"]
             * costs.at["methanolisation", "carbondioxide-input"]
         )
         onight_cost_cc = (
             onight_cost
             + costs.at["cement capture", "investment"]
+            * options["cc_investment_cost_factor"]["gas"]
+            * costs.at["methanolisation", "carbondioxide-input"]
+        )
+        efficiency_cc = (
+            costs.at["CCGT", "efficiency"]
+            - (
+                costs.at["cement capture", "electricity-input"]
+                + costs.at["cement capture", "compression-electricity-input"]
+            )
             * costs.at["methanolisation", "carbondioxide-input"]
         )
 
@@ -1376,8 +1384,9 @@ def add_methanol_to_power(n, costs, pop_layout, types=None):
             p_nom_extendable=True,
             capital_cost=capital_cost_cc,
             onight_cost=onight_cost_cc,
-            marginal_cost=costs.at["CCGT", "VOM"],
-            efficiency=costs.at["CCGT", "efficiency"],
+            marginal_cost=costs.at["CCGT", "VOM"]
+            * efficiency_cc,
+            efficiency=efficiency_cc,
             efficiency2=costs.at["cement capture", "capture_rate"]
             * costs.at["methanolisation", "carbondioxide-input"],
             efficiency3=(1 - costs.at["cement capture", "capture_rate"])
@@ -1432,7 +1441,7 @@ def add_methanol_reforming(n, costs):
     )
 
 
-def add_methanol_reforming_cc(n, costs):
+def add_methanol_reforming_cc(n, costs, options):
     logger.info("Adding methanol steam reforming with carbon capture.")
 
     tech = "Methanol steam reforming"
@@ -1447,13 +1456,19 @@ def add_methanol_reforming_cc(n, costs):
     capital_cost_cc = (
         capital_cost
         + costs.at["cement capture", "capital_cost"]
+        * options["cc_capital_cost_factor"]["gas"]
         * costs.at["methanolisation", "carbondioxide-input"]
     )
     onight_cost_cc = (
         onight_cost
         + costs.at["cement capture", "investment"]
+        * options["cc_investment_cost_factor"]["gas"]
         * costs.at["methanolisation", "carbondioxide-input"]
     )
+    electricity_cc = (
+        costs.at["cement capture", "electricity-input"]
+        + costs.at["cement capture", "compression-electricity-input"]
+    ) * costs.at["methanolisation", "carbondioxide-input"]
 
     n.add(
         "Link",
@@ -1463,6 +1478,7 @@ def add_methanol_reforming_cc(n, costs):
         bus1=spatial.h2.nodes,
         bus2="co2 atmosphere",
         bus3=spatial.co2.nodes,
+        bus4=spatial.h2.locations,
         p_nom_extendable=True,
         capital_cost=capital_cost_cc,
         onight_cost=onight_cost_cc,
@@ -1472,6 +1488,7 @@ def add_methanol_reforming_cc(n, costs):
         efficiency3=costs.at["cement capture", "capture_rate"]
         * costs.at["methanolisation", "carbondioxide-input"],
         carrier=f"{tech} CC",
+        efficiency4=-electricity_cc,
         lifetime=costs.at[tech, "lifetime"],
     )
 
@@ -2461,6 +2478,14 @@ def add_h2_gas_infrastructure(
         )
 
     if options["coal_cc"]:
+        efficiency_cc = (
+            costs.at["coal", "efficiency"]
+            - (
+                costs.at["biomass CHP capture", "electricity-input"]
+                + costs.at["biomass CHP capture", "compression-electricity-input"]
+            )
+            * costs.at["coal", "CO2 intensity"]
+        )
         n.add(
             "Link",
             spatial.nodes,
@@ -2480,7 +2505,7 @@ def add_h2_gas_infrastructure(
             * costs.at["coal", "CO2 intensity"],
             p_nom_extendable=True,
             carrier="coal",
-            efficiency=costs.at["coal", "efficiency"],
+            efficiency=efficiency_cc,
             efficiency2=costs.at["coal", "CO2 intensity"]
             * (1 - costs.at["biomass CHP capture", "capture_rate"]),
             efficiency3=costs.at["coal", "CO2 intensity"]
@@ -4132,6 +4157,7 @@ def add_methanol(
             n=n,
             costs=costs,
             pop_layout=pop_layout,
+            options=options,
             types=methanol_options["methanol_to_power"],
         )
 
@@ -4139,7 +4165,7 @@ def add_methanol(
         add_methanol_reforming(n=n, costs=costs)
 
     if methanol_options["methanol_reforming_cc"]:
-        add_methanol_reforming_cc(n=n, costs=costs)
+        add_methanol_reforming_cc(n=n, costs=costs, options=options)
 
 
 def add_biomass(
@@ -5109,6 +5135,16 @@ def add_industry(
         link_names = nodes + " " + spatial.biomass.industry_cc
     else:
         link_names = spatial.biomass.industry_cc
+    
+    if options["biomass_spatial"]:
+        bus4 = spatial.biomass.locations
+        efficiency4 = costs.at["solid biomass", "CO2 intensity"] * (
+            costs.at["cement capture", "electricity-input"]
+            + costs.at["cement capture", "compression-electricity-input"]
+        )
+    else:
+        bus4 = ""
+        efficiency4 = 1.0
 
     n.add(
         "Link",
@@ -5117,10 +5153,12 @@ def add_industry(
         bus1=spatial.biomass.industry,
         bus2="co2 atmosphere",
         bus3=spatial.co2.nodes,
+        bus4=bus4,
         carrier="solid biomass for industry CC",
         p_nom_extendable=True,
         capital_cost=costs.at["cement capture", "capital_cost"]
-        * costs.at["solid biomass", "CO2 intensity"],
+        * costs.at["solid biomass", "CO2 intensity"]
+        * options["cc_capital_cost_factor"]["biomass"],
         onight_cost=costs.at["cement capture", "investment"]
         * costs.at["solid biomass", "CO2 intensity"],
         efficiency=0.9,  # TODO: make config option
@@ -5129,6 +5167,7 @@ def add_industry(
         efficiency3=costs.at["solid biomass", "CO2 intensity"]
         * costs.at["cement capture", "capture_rate"],
         lifetime=costs.at["cement capture", "lifetime"],
+        efficiency4=-efficiency4,
     )
 
     n.add(
@@ -5143,8 +5182,15 @@ def add_industry(
 
     if options["gas_network"] or options["regional_gas_demand"]:
         spatial_gas_demand = gas_demand.rename(index=lambda x: x + " gas for industry")
+        bus4 = spatial.gas.locations
+        efficiency4 = costs.at["gas", "CO2 intensity"] * (
+            costs.at["cement capture", "electricity-input"]
+            + costs.at["cement capture", "compression-electricity-input"]
+        )
     else:
         spatial_gas_demand = gas_demand.sum()
+        bus4 = ""
+        efficiency4 = 1.0
 
     n.add(
         "Load",
@@ -5173,11 +5219,14 @@ def add_industry(
         bus1=spatial.gas.industry,
         bus2="co2 atmosphere",
         bus3=spatial.co2.nodes,
+        bus4=bus4,
         carrier="gas for industry CC",
         p_nom_extendable=True,
         capital_cost=costs.at["cement capture", "capital_cost"]
+        * options["cc_capital_cost_factor"]["gas"]
         * costs.at["gas", "CO2 intensity"],
         onight_cost=costs.at["cement capture", "investment"]
+        * options["cc_capital_cost_factor"]["gas"]
         * costs.at["gas", "CO2 intensity"],
         efficiency=0.9,
         efficiency2=costs.at["gas", "CO2 intensity"]
@@ -5185,6 +5234,7 @@ def add_industry(
         efficiency3=costs.at["gas", "CO2 intensity"]
         * costs.at["cement capture", "capture_rate"],
         lifetime=costs.at["cement capture", "lifetime"],
+        efficiency4=-efficiency4,
     )
 
     n.add(
@@ -5563,6 +5613,16 @@ def add_industry(
     )
 
     # assume enough local waste heat for CC
+    if options["co2_spatial"]:
+        bus3 = spatial.co2.locations
+        efficiency3 = (
+            costs.at["cement capture", "electricity-input"]
+            + costs.at["cement capture", "compression-electricity-input"]
+        )
+    else:
+        bus3 = ""
+        efficiency3 = 1.0
+
     n.add(
         "Link",
         spatial.co2.locations,
@@ -5570,12 +5630,16 @@ def add_industry(
         bus0=spatial.co2.process_emissions,
         bus1="co2 atmosphere",
         bus2=spatial.co2.nodes,
+        bus3=bus3,
         carrier="process emissions CC",
         p_nom_extendable=True,
-        capital_cost=costs.at["cement capture", "capital_cost"],
-        onight_cost=costs.at["cement capture", "investment"],
+        capital_cost=costs.at["cement capture", "capital_cost"]
+        * options["cc_capital_cost_factor"]["cement"],
+        onight_cost=costs.at["cement capture", "investment"]
+        * options["cc_capital_cost_factor"]["cement"],
         efficiency=1 - costs.at["cement capture", "capture_rate"],
         efficiency2=costs.at["cement capture", "capture_rate"],
+        efficiency3=-efficiency3,
         lifetime=costs.at["cement capture", "lifetime"],
     )
 
